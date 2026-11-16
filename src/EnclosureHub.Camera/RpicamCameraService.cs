@@ -124,9 +124,11 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 
     private void OnOptionsChanged(RpicamCameraOptions options)
     {
-        if (Signature(options, BuildArguments(options)) == _activeSignature)
-            return; // e.g. another section was saved – nothing relevant changed
+        string signature = Signature(options, BuildArguments(options));
+        if (signature == _activeSignature)
+            return; // e.g. another section was saved, or the reload fired twice – nothing relevant changed
 
+        _activeSignature = signature;
         _logger.LogInformation("Camera settings changed, applying");
         try
         {
