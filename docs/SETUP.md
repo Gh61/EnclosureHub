@@ -1,0 +1,137 @@
+# Setup
+
+## 1. Raspberry Pi OS
+
+1. Flash **Raspberry Pi OS Lite (32-bit)** with Raspberry Pi Imager (64-bit if your Pi supports it and you
+   publish with `-r linux-arm64`).
+2. In Imager's OS customisation set **hostname, user + password, Wi-Fi (country!), enable SSH**.
+   There is no default user/password on current Raspberry Pi OS.
+3. Boot (first boot takes a few minutes on older Pis), then `ssh <user>@<hostname>.local`.
+4. Update: `sudo apt update && sudo apt full-upgrade -y`
+
+### Networking tips
+
+- Give the Pi a fixed address via a **DHCP reservation in your router** (simplest), or with `sudo nmtui`.
+- Disable Wi-Fi power saving to avoid dropouts:
+  ```bash
+  sudo nmcli connection modify "<connection name>" 802-11-wireless.powersave 2
+  ```
+- Run `nmcli`/`nmtui` commands that change settings with `sudo`. Without it, PolicyKit waits for an
+  authentication prompt that never appears over SSH and the command fails with *"Timeout was reached"*.
+- Network names with spaces must be quoted: `"My Network"`.
+
+### USB Wi-Fi adapters with Realtek RTL88x2BU (rtw88_8822bu)
+
+Observed with a TP-Link Archer T3U Plus on a Pi 2 (kernel 6.18): authentication succeeds but
+**association on 2.4 GHz always times out** when 802.11n is enabled; 5 GHz works fine.
+NetworkManager then misleadingly keeps asking for the password.
+How to diagnose:
+
+```bash
+sudo dmesg | grep wlan0        # "association with … timed out", no "RX AssocResp"
+```
+
+A test with `wpa_supplicant` and `disable_ht=1` connects on 2.4 GHz, so the problem is in 802.11n handling;
+setting the router to 20 MHz did not help. Options: use 5 GHz (what this project uses), Ethernet, or an adapter
+with a MediaTek/Ralink chipset (MT7601U, RT5370, MT7610U/MT7612U). Also recommended for rtw88:
+
+```bash
+echo "options rtw88_core disable_lps_deep=y" | sudo tee /etc/modprobe.d/rtw88.conf
+```
+
+## 2. Camera
+
+Connect the ribbon cable to the CAMERA connector (on Pi 2/3 the blue side faces the Ethernet port).
+
+```bash
+rpicam-hello --list-cameras     # must list e.g. imx219
+rpicam-still -n -o test.jpg
+rpicam-vid -t 5000 -n --codec mjpeg --framerate 1 --width 1640 --height 1232 -o test.mjpeg
+```
+
+- `rpicam-*` missing → `sudo apt install rpicam-apps-lite`
+- Camera not detected → in `/boot/firmware/config.txt` set `camera_auto_detect=0` and add `dtoverlay=imx219`
+  (or the overlay for your sensor), then reboot.
+- Image upside down → `"ExtraArgs": "--rotation 180"` in `Modules:Camera`.
+
+## 3. MQTT broker in Home Assistant
+
+1. *Settings → Add-ons → Add-on store* → **Mosquitto broker** → Install → Start (enable *Start on boot*).
+   Running HA in Docker without add-ons? Use the `eclipse-mosquitto` container instead.
+2. *Settings → People → Users* → add a user, e.g. `enclosurehub` (no admin rights needed).
+   The Mosquitto add-on authenticates against Home Assistant users.
+   The *Users* tab is only visible with *Advanced mode* enabled in your profile.
+3. *Settings → Devices & services* → **MQTT** should be discovered → Configure.
+4. Optional test from the Pi:
+   ```bash
+   sudo apt install mosquitto-clients
+   mosquitto_pub -h <ha-address> -u enclosurehub -P <password> -t test -m hello
+   ```
+   In HA: MQTT → Configure → *Listen to a topic* `test`.
+
+## 4. Deploy
+
+On the Pi (once):
+
+```bash
+sudo mkdir -p /opt/enclosurehub && sudo chown $USER /opt/enclosurehub
+```
+
+Set up SSH key login from your PC (needed by the deploy scripts, and handy for Claude Code):
+
+```powershell
+# Windows PowerShell
+ssh-keygen -t ed25519
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh <user>@<pi> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+```
+```bash
+# Linux/macOS
+ssh-copy-id <user>@<pi>
+```
+
+Check that sudo works without a password (default for the Imager-created user): `ssh <user>@<pi> sudo -n true && echo OK`
+
+Install the service (edit `User=` first):
+
+```bash
+scp deploy/enclosurehub.service <user>@<pi>:/tmp/
+ssh <user>@<pi> "sudo mv /tmp/enclosurehub.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable enclosurehub"
+```
+
+Build and deploy:
+
+```bash
+./deploy/deploy.sh <user>@<pi>
+```
+
+Local configuration on the Pi – `/opt/enclosurehub/appsettings.Local.json`:
+
+```json
+{
+  "Mqtt": { "Host": "192.168.1.10", "Username": "enclosurehub", "Password": "…" }
+}
+```
+
+```bash
+chmod 600 /opt/enclosurehub/appsettings.Local.json
+sudo systemctl restart enclosurehub
+journalctl -u enclosurehub -f
+```
+
+## 5. Home Assistant
+
+- *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera running, CPU temperature.
+- Dashboard: *Picture Entity* / *Picture Glance* card with the camera entity.
+- Optional live view: **MJPEG IP Camera** integration with
+  MJPEG URL `http://<pi>:8080/api/cameras/camera/stream.mjpeg` and
+  still image URL `http://<pi>:8080/api/cameras/camera/snapshot.jpg`.
+- Printer status: the built-in **PrusaLink** integration – combine it with these entities in automations.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| No image | `journalctl -u enclosurehub` – lines starting with `rpicam:`; run `rpicam-hello --list-cameras` |
+| Device missing in HA | `mosquitto_sub -h <ha> -u … -P … -t 'homeassistant/#' -v` |
+| Entities "unavailable" | `enclosurehub/status` must be `online` |
+| Service won't start | `systemctl status enclosurehub`; `User=` exists and is in the `video` group |

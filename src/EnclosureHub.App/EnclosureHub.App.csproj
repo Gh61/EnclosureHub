@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>EnclosureHub.App</RootNamespace>
+    <AssemblyName>enclosurehub</AssemblyName>
+
+    <!-- Raspberry Pi 2 has 1 GB RAM and 4 slow cores: workstation GC without background GC saves memory -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+
+    <!-- No libicu needed on Raspberry Pi OS Lite -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- RuntimeIdentifier is intentionally NOT set here so the app can be debugged on Windows.
+         Publish with: dotnet publish src/EnclosureHub.App -c Release -r linux-arm self-contained -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Local overrides live only on the device; never overwrite them on deploy -->
+    <Content Update="appsettings.Local.json;appsettings.Local.example.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EnclosureHub.Core\EnclosureHub.Core.csproj" />
+    <ProjectReference Include="..\EnclosureHub.Camera\EnclosureHub.Camera.csproj" />
+    <ProjectReference Include="..\EnclosureHub.Mqtt\EnclosureHub.Mqtt.csproj" />
+  </ItemGroup>
+
+</Project>

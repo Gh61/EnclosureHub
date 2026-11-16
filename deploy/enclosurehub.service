@@ -1,0 +1,17 @@
+[Unit]
+Description=Enclosure Hub (camera, sensors, lights, fans for a 3D printer enclosure)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# Change to your user (must be in the "video" group for camera access; the default user is)
+User=pi
+WorkingDirectory=/opt/enclosurehub
+ExecStart=/opt/enclosurehub/enclosurehub
+Environment=DOTNET_ENVIRONMENT=Production
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

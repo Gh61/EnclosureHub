@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EnclosureHub.Core/EnclosureHub.Core.csproj" />
+    <Project Path="src/EnclosureHub.Camera/EnclosureHub.Camera.csproj" />
+    <Project Path="src/EnclosureHub.Mqtt/EnclosureHub.Mqtt.csproj" />
+    <Project Path="src/EnclosureHub.App/EnclosureHub.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EnclosureHub.Tests/EnclosureHub.Tests.csproj" />
+  </Folder>
+</Solution>
