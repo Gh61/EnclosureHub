@@ -116,4 +116,4 @@ dotnet run --project src/EnclosureHub.App   # runs on Windows/Linux too; camera 
 
 ## License
 
-TBD – add a `LICENSE` file before publishing (MIT is a common choice for projects like this).
+[MIT](LICENSE) © Tomáš Zenkner

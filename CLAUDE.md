@@ -11,9 +11,8 @@ discovery and exposes a local HTTP API + SSE for displays. Read `docs/ARCHITECTU
 
 ## Status
 
-The code is an **uncompiled scaffold**. First task: `dotnet build`, fix compile errors, `dotnet test`.
-The MJPEG splitter algorithm was verified separately; MQTT and API code were written against the
-MQTTnet 4.3.x API and ASP.NET Core minimal APIs but never compiled.
+M1 (camera + system sensors + MQTT discovery + HTTP API/SSE + `--install`) builds, passes
+`dotnet test` and runs on the target Pi as a systemd service. Next milestones: see `docs/ROADMAP.md`.
 
 ## Commands
 

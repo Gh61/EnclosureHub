@@ -1,9 +1,9 @@
 # Roadmap
 
-## M1 – Camera + Home Assistant ✅ (scaffold)
+## M1 – Camera + Home Assistant ✅
 
-Camera module, system sensors, MQTT bridge with discovery, HTTP API with SSE.
-Remaining: build/verify on the Pi, tune defaults.
+Camera module, system sensors, MQTT bridge with discovery, HTTP API with SSE, `--install` for the
+systemd service. Verified on a Raspberry Pi 2 with Camera Module 2 (about 70 MB RSS, 1 fps at 1640×1232).
 
 ## M2 – Lighting
 

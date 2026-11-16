@@ -135,6 +135,7 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 | Symptom | Check |
 |---|---|
 | No image | `journalctl -u enclosurehub` – lines starting with `rpicam:`; run `rpicam-hello --list-cameras` |
+| `MQTT error: … (NotAuthorized)` in the log | The broker rejects the username/password. Check the user in HA (*Settings → People → Users*) and the values in `appsettings.Local.json`; test with `mosquitto_sub -h <ha> -u … -P … -t test -C 1` |
 | Device missing in HA | `mosquitto_sub -h <ha> -u … -P … -t 'homeassistant/#' -v` |
 | Entities "unavailable" | `enclosurehub/status` must be `online` |
 | Service won't start | `systemctl status enclosurehub`; re-run `sudo /opt/enclosurehub/enclosurehub --install` after changing users |
