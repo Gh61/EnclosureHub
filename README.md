@@ -1,22 +1,52 @@
 # Enclosure Hub
 
-A small, modular controller for 3D printer enclosure accessories, running on a Raspberry Pi
-and integrating with [Home Assistant](https://www.home-assistant.io/) – **fully local, no cloud**.
+A small, modular controller for 3D printer enclosure accessories, running on a Raspberry Pi and
+integrating with [Home Assistant](https://www.home-assistant.io/) – **fully local, no cloud, no Python**.
 
-Built for a Prusa MK4S in an enclosure, but nothing in it is printer-specific.
+Built for a Prusa MK4S in an enclosure, but nothing in it is printer-specific. One self-contained .NET
+binary on the Pi gives you a camera, a web dashboard, a local HTTP API and Home Assistant entities that
+appear automatically via MQTT discovery. Lights, fans and a touch display are the next modules.
 
-| Status | Feature |
-|---|---|
-| ✅ | Camera (Raspberry Pi Camera Module via `rpicam-vid`) – snapshots, MJPEG stream |
-| ✅ | Home Assistant integration via MQTT discovery (entities appear automatically) |
-| ✅ | Local HTTP API + live event stream for displays and other clients |
-| ✅ | Web dashboard (camera view, entity status, camera settings, restart) with optional Basic auth |
-| ✅ | Controller health sensors (CPU temperature, camera running) |
-| 🛠️ | LED lighting (PWM, RGB + tunable white) |
-| 🛠️ | Enclosure fans (PWM) + temperature/humidity sensor |
-| 🛠️ | Touch display UI |
+<p align="center">
+  <img src="docs/screenshots/camera.jpg" alt="Camera page" width="49%">
+  <img src="docs/screenshots/settings.jpg" alt="Settings page" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/status.jpg" alt="Status page" width="49%">
+  <img src="docs/screenshots/system.jpg" alt="System page" width="49%">
+</p>
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and how it will work.
+## What works today
+
+- **Camera** – Raspberry Pi Camera Module via `rpicam-vid`: one long-lived process, latest JPEG kept in
+  memory, MJPEG stream and snapshot over HTTP. Presets *Monitoring* (1640 × 1232 @ 1 fps), *1080p30*,
+  *720p60*, *480p90* or a custom resolution / frame rate / quality / rotation. Can be turned off and on at runtime.
+- **Home Assistant** – MQTT discovery; the device *Printer Enclosure* with Camera, *Camera running* and
+  *CPU temperature* shows up without any YAML. Availability (last will), retained states, discovery
+  republished when HA restarts. Camera either as an MQTT camera (JPEG pushed every few seconds) or in
+  *link* mode (HA fetches snapshots itself; stream URL as an attribute) for fast camera modes.
+- **Web dashboard** – black-and-white single-page UI served by the hub: live camera, entity status via
+  Server-Sent Events, settings (applied live and saved on the device), system info and restart.
+  Switchable off, optional HTTP Basic authentication.
+- **Local HTTP API + SSE** – the contract for displays and other clients; the dashboard is its reference client.
+- **Controller health** – CPU temperature and camera-running sensors.
+- **Installation** – `deploy` script from your PC, then `sudo enclosurehub --install` creates and starts the systemd service.
+
+## Not done yet
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for details and the intended hardware.
+
+- **Lighting** (M2) – LED strip with RGB + tunable white over PWM (Pi hardware PWM or PCA9685), exposed as a
+  Home Assistant light. The `LightEntity` model and the HTTP command endpoint exist; no hardware module and no
+  MQTT command handling yet.
+- **Fans and climate** (M3) – PWM fans with optional tachometer, BME280/SHT31 temperature and humidity.
+  `FanEntity` exists, hardware module does not.
+- **Touch display** (M4) – a dedicated display client (web kiosk, Avalonia or ESP32) using the same API.
+- **Printer awareness** (M5) – read PrusaLink locally and expose job progress.
+- Smaller gaps: MQTT command topics (`{base}/{entity}/set`) are reserved but not consumed; secrets
+  (MQTT, auth) can only be edited in the config file, not in the dashboard; HTTPS is not provided (LAN only).
+
+The project is a personal build tested on exactly one setup (see Hardware). Expect rough edges.
 
 ## How it works
 
@@ -27,29 +57,45 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and how it will work.
  Camera  ───►│  Camera (rpicam) ──► camera             ┌► MQTT ─────┼─► Home Assistant
              │                      camera_running ────┤             │
  /sys    ───►│  System sensors ──► cpu_temperature ────┤             │
-             │                                         └► HTTP API ──┼─► Touch display,
- PWM/I²C ───►│  Lights, fans (planned) ► light, fan     (REST + SSE) │   browser, scripts
+             │                                         ├► HTTP API ──┼─► Touch display,
+ PWM/I²C ───►│  Lights, fans (planned) ► light, fan     │  (REST+SSE) │   browser, scripts
+             │                                         └► Dashboard ─┼─► Your browser
              └──────────────────────────────────────────────────────┘
 ```
 
 - **Modules** talk to hardware and own **entities** (camera, sensor, binary sensor, light, fan).
 - **Adapters** expose all entities to the outside world without knowing about hardware.
   Adding a fan module automatically makes the fan available in Home Assistant *and* on any display.
+- Modules can also expose **settings sections**; the dashboard renders them generically.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Built on
+
+| | |
+|---|---|
+| Runtime | [.NET 10](https://dotnet.microsoft.com/), published self-contained for `linux-arm` with ReadyToRun – nothing to install on the Pi |
+| Web | ASP.NET Core minimal APIs, Kestrel, Server-Sent Events, static files; dashboard is plain HTML/CSS/JS (no framework, no build step) |
+| MQTT | [MQTTnet 4.x](https://github.com/dotnet/MQTTnet) with Home Assistant MQTT discovery (`camera`, `image`, `sensor`, `binary_sensor`) |
+| Camera | [`rpicam-apps`](https://www.raspberrypi.com/documentation/computers/camera_software.html) (`rpicam-vid --codec mjpeg`) and a small MJPEG frame splitter |
+| Service | systemd (`Type=notify`), unit generated by `enclosurehub --install` |
+| Tests | xUnit |
 
 ## Hardware
 
 Developed and tested on:
 
-- Raspberry Pi 2 Model B v1.1 (1 GB RAM, 32-bit ARMv7) – anything newer works too
+- Raspberry Pi 2 Model B v1.1 (1 GB RAM, 32-bit ARMv7) – anything newer works too (use `-Runtime linux-arm64` on a 64-bit OS)
 - Raspberry Pi Camera Module 2 (IMX219)
 - Raspberry Pi OS Lite 13 (Trixie), 32-bit
+
+Footprint on the Pi 2 in the monitoring preset: about 90 MB RSS for the hub, 15 % of one core for the camera.
+The fast presets are limited by the software JPEG encoder (roughly 35 fps at 720p, using most of the CPU).
 
 ## Quick start
 
 1. Prepare the Pi and Home Assistant: [docs/SETUP.md](docs/SETUP.md)
-2. Build and deploy from your PC (requires [.NET 10 SDK](https://dotnet.microsoft.com/download);
+2. Build and deploy from your PC (requires the [.NET 10 SDK](https://dotnet.microsoft.com/download);
    nothing needs to be installed on the Pi except `rpicam-apps-lite`):
 
    ```bash
@@ -71,19 +117,17 @@ Developed and tested on:
 
 ## Web dashboard
 
-A small single-page UI served by the hub itself (black/white, works on phones too):
-
-- **Camera** – live MJPEG view, running indicator, snapshot link.
-- **Status** – all entities with live values (Server-Sent Events).
-- **Settings** – camera on/off, resolution, frame rate, JPEG quality, rotation, extra rpicam arguments;
-  the dashboard itself can be switched off here. Changes are written to `appsettings.Local.json`
-  and applied live (the camera process restarts within a few seconds).
+- **Camera** – live MJPEG view, running indicator, snapshot and stream links.
+- **Status** – all entities with live values.
+- **Settings** – camera on/off, mode presets, resolution, frame rate, JPEG quality, rotation, extra rpicam
+  arguments; Home Assistant camera mode, image interval and hub address; dashboard on/off. Changes are
+  written to `appsettings.Local.json` and applied live (the camera process restarts within a few seconds).
 - **System** – version, host, uptime, memory and a *Restart service* button.
 
-Settings → `Web:Dashboard:Enabled` turns the UI off (the API keeps working; re-enable it in the config file).
-Set `Web:Auth:Username` / `Web:Auth:Password` to protect **everything** the server serves (dashboard, API,
-camera endpoints; only `/health` stays open) with HTTP Basic authentication. It is plain HTTP on your LAN,
-so treat it as a lock against accidental changes rather than strong security.
+`Web:Dashboard:Enabled` turns the UI off (the API keeps working; re-enable it in the config file).
+`Web:Auth:Username` / `Web:Auth:Password` protect **everything** the server serves (dashboard, API, camera
+endpoints; only `/health` stays open) with HTTP Basic authentication. It is plain HTTP on your LAN, so treat
+it as a lock against accidental changes rather than strong security.
 
 ## Configuration
 
@@ -98,15 +142,14 @@ so treat it as a lock against accidental changes rather than strong security.
 | `Modules:SystemSensors` | `Enabled`, polling interval |
 | `Mqtt` | `Enabled`, broker `Host`/`Port`/`Username`/`Password`; `CameraMode` (`Image`/`Link`), `CameraImageIntervalSeconds`, `PublicUrl` |
 
-The dashboard edits the camera, Home Assistant camera-mode and dashboard values of `appsettings.Local.json`;
-everything else (broker, passwords) is file-only.
+Any value can also be set via environment variables, e.g. `Mqtt__Password=...`. The dashboard edits the
+camera, Home Assistant camera-mode and dashboard values; everything else (broker, passwords) is file-only.
 
 ### Camera modes and Home Assistant
 
-The camera has presets – *Monitoring* (1640 × 1232 @ 1 fps), *1080p30*, *720p60*, *480p90* – or a custom
-resolution/frame rate. Fast modes are for the live MJPEG stream (dashboard, browser, Home Assistant's
-*MJPEG IP Camera* integration) and load the Pi 2 noticeably; pushing every frame through MQTT at those
-rates makes no sense, so `Mqtt:CameraMode` chooses how Home Assistant sees the camera:
+Fast camera modes are for the live MJPEG stream (dashboard, browser, Home Assistant's *MJPEG IP Camera*
+integration). Pushing every frame through MQTT at those rates makes no sense, so `Mqtt:CameraMode` chooses
+how Home Assistant sees the camera:
 
 | `CameraMode` | Home Assistant entity | What is published |
 |---|---|---|
@@ -116,8 +159,6 @@ rates makes no sense, so `Mqtt:CameraMode` chooses how Home Assistant sees the c
 In both modes the entity carries the attributes `stream_url`, `snapshot_url` and `dashboard_url`, built from
 `Mqtt:PublicUrl` (auto-detected LAN address + port when empty). For live video in Home Assistant add the
 **MJPEG IP Camera** integration with `stream_url`.
-
-Any value can also be set via environment variables, e.g. `Mqtt__Password=...`.
 
 ## HTTP API
 
@@ -132,7 +173,7 @@ Any value can also be set via environment variables, e.g. `Mqtt__Password=...`.
 | `GET /api/cameras/{id}/snapshot.jpg` | Latest camera frame |
 | `GET /api/cameras/{id}/stream.mjpeg` | MJPEG stream |
 | `GET /api/settings` | Settings sections (fields + current values) exposed by the modules |
-| `PUT /api/settings/{section}` | Apply settings, e.g. `{"enabled":false}` or `{"resolution":"1920x1080","quality":70}` |
+| `PUT /api/settings/{section}` | Apply settings, e.g. `{"enabled":false}` or `{"preset":"720p60"}` |
 | `GET /api/system` | Version, host, uptime, memory |
 | `POST /api/system/restart` | Graceful shutdown; systemd restarts the service |
 
@@ -156,6 +197,10 @@ dotnet build
 dotnet test
 dotnet run --project src/EnclosureHub.App   # runs on Windows/Linux too; camera just keeps retrying
 ```
+
+Repository layout: `src/EnclosureHub.Core` (entity + settings model), `src/EnclosureHub.Camera`,
+`src/EnclosureHub.Mqtt`, `src/EnclosureHub.App` (host, API, dashboard, installer), `tests/`, `deploy/`, `docs/`.
+Large parts of this project were written together with Claude Code.
 
 ## License
 
