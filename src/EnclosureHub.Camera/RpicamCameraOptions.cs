@@ -3,6 +3,12 @@ namespace EnclosureHub.Camera;
 /// <summary>Bound from "Modules:Camera".</summary>
 public sealed class RpicamCameraOptions
 {
+    /// <summary>
+    /// False at startup = module not loaded (no camera entities). Changed at runtime (dashboard),
+    /// it stops/starts the camera process while the entities stay registered.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     public string Id { get; set; } = "camera";
 
     public string Name { get; set; } = "Camera";
@@ -21,7 +27,10 @@ public sealed class RpicamCameraOptions
     /// <summary>JPEG quality 1–100.</summary>
     public int Quality { get; set; } = 85;
 
-    /// <summary>Extra rpicam-vid arguments, e.g. "--rotation 180" or "--hflip --vflip".</summary>
+    /// <summary>Image rotation in degrees; rpicam supports 0 and 180.</summary>
+    public int Rotation { get; set; }
+
+    /// <summary>Extra rpicam-vid arguments, e.g. "--hflip --vflip".</summary>
     public string ExtraArgs { get; set; } = "";
 
     /// <summary>Delay before restarting rpicam-vid after it exits.</summary>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Enclosure Hub</title>
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <nav class="sidebar" aria-label="Sections">
+    <div class="brand">
+      <div class="brand-title">Enclosure Hub</div>
+      <div class="brand-sub" id="device-name">&nbsp;</div>
+    </div>
+    <a href="#camera" data-page="camera">Camera</a>
+    <a href="#status" data-page="status">Status</a>
+    <a href="#settings" data-page="settings">Settings</a>
+    <a href="#system" data-page="system">System</a>
+    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">Connecting…</span></div>
+  </nav>
+
+  <main>
+    <section id="page-camera" class="page">
+      <h1>Camera</h1>
+      <div id="cameras"></div>
+    </section>
+
+    <section id="page-status" class="page">
+      <h1>Status</h1>
+      <p class="lead">All entities of this controller, updated live.</p>
+      <div id="entities" class="rows"></div>
+    </section>
+
+    <section id="page-settings" class="page">
+      <h1>Settings</h1>
+      <p class="lead">Changes are saved to appsettings.Local.json on the device.</p>
+      <div id="settings"></div>
+    </section>
+
+    <section id="page-system" class="page">
+      <h1>System</h1>
+      <div id="system" class="rows"></div>
+      <div class="row">
+        <div>
+          <div class="label">Restart service</div>
+          <div class="desc">Stops the application cleanly; systemd starts it again within a few seconds. Needed after enabling a module that was off at startup.</div>
+        </div>
+        <div class="control">
+          <button class="btn" id="restart-btn" type="button">Restart</button>
+          <span class="note" id="restart-note"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/dashboard.js"></script>
+</body>
+</html>

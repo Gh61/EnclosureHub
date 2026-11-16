@@ -1,0 +1,200 @@
+using System.Globalization;
+using EnclosureHub.Core.Settings;
+using Microsoft.Extensions.Options;
+
+namespace EnclosureHub.Camera;
+
+/// <summary>
+/// Runtime-editable camera settings (dashboard "Settings → Camera"). Values are written to the
+/// local configuration via <see cref="ISettingsStore"/>; <see cref="RpicamCameraService"/> picks
+/// them up through its options monitor and restarts rpicam-vid.
+/// </summary>
+public sealed class RpicamCameraSettingsSection : ISettingsSection
+{
+    private static readonly SettingChoice[] Resolutions =
+    [
+        new("640x480", "640 × 480"),
+        new("1280x960", "1280 × 960"),
+        new("1640x1232", "1640 × 1232 – full view (recommended)"),
+        new("1920x1080", "1920 × 1080 – cropped"),
+        new("3280x2464", "3280 × 2464 – full resolution, slow"),
+    ];
+
+    private static readonly SettingChoice[] Framerates =
+    [
+        new("0.2", "1 frame every 5 s"),
+        new("0.5", "1 frame every 2 s"),
+        new("1", "1 frame per second"),
+        new("2", "2 frames per second"),
+        new("5", "5 frames per second"),
+    ];
+
+    private static readonly SettingChoice[] Rotations =
+    [
+        new("0", "0°"),
+        new("180", "180°"),
+    ];
+
+    private readonly IOptionsMonitor<RpicamCameraOptions> _options;
+    private readonly ISettingsStore _store;
+    private readonly string _configPath;
+    private readonly bool _moduleLoaded;
+
+    /// <param name="configPath">Configuration path of the options, e.g. "Modules:Camera".</param>
+    /// <param name="moduleLoaded">False when the module was disabled at startup (entities not registered).</param>
+    public RpicamCameraSettingsSection(
+        IOptionsMonitor<RpicamCameraOptions> options,
+        ISettingsStore store,
+        string configPath,
+        bool moduleLoaded)
+    {
+        _options = options;
+        _store = store;
+        _configPath = configPath;
+        _moduleLoaded = moduleLoaded;
+    }
+
+    public string Id => "camera";
+
+    public string Title => "Camera";
+
+    public string? Description => "Raspberry Pi camera captured with rpicam-vid. Changes apply within a few seconds.";
+
+    public IReadOnlyList<SettingField> Fields
+    {
+        get
+        {
+            var o = _options.CurrentValue;
+            return
+            [
+                new("enabled", "Camera", SettingFieldType.Toggle,
+                    "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause."),
+                new("resolution", "Resolution", SettingFieldType.Choice,
+                    "1640 × 1232 shows the whole sensor area; 1920 × 1080 is a crop of the centre.",
+                    WithCurrent(Resolutions, Resolution(o))),
+                new("framerate", "Frame rate", SettingFieldType.Choice,
+                    "Higher rates cost CPU on the Pi and bandwidth for the stream.",
+                    WithCurrent(Framerates, Fmt(o.Framerate))),
+                new("quality", "JPEG quality", SettingFieldType.Number,
+                    "1–100. 85 is a good balance; 70 roughly halves the image size.", Min: 1, Max: 100, Step: 1),
+                new("rotation", "Rotation", SettingFieldType.Choice,
+                    "Use 180° when the camera is mounted upside down.",
+                    WithCurrent(Rotations, Fmt(o.Rotation))),
+                new("extraArgs", "Extra arguments", SettingFieldType.Text,
+                    "Additional rpicam-vid options, e.g. --hflip --vflip or --awb tungsten."),
+            ];
+        }
+    }
+
+    public IReadOnlyDictionary<string, object?> GetValues()
+    {
+        var o = _options.CurrentValue;
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = o.Enabled,
+            ["resolution"] = Resolution(o),
+            ["framerate"] = Fmt(o.Framerate),
+            ["quality"] = (double)o.Quality,
+            ["rotation"] = Fmt(o.Rotation),
+            ["extraArgs"] = o.ExtraArgs,
+        };
+    }
+
+    public async Task<SettingsApplyResult> ApplyAsync(IReadOnlyDictionary<string, string?> values, CancellationToken cancellationToken)
+    {
+        var changes = new Dictionary<string, object?>();
+        bool? enabled = null;
+
+        if (values.TryGetValue("enabled", out var enabledText))
+        {
+            enabled = ParseBool(enabledText, "Camera");
+            changes[Key("Enabled")] = enabled.Value;
+        }
+
+        if (values.TryGetValue("resolution", out var resolution))
+        {
+            var parts = (resolution ?? "").Split('x', 'X', '×');
+            if (parts.Length != 2
+                || !int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int width)
+                || !int.TryParse(parts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int height)
+                || width < 64 || height < 64 || width > 4096 || height > 4096)
+                throw new SettingsValidationException("Resolution must be WIDTHxHEIGHT between 64 and 4096 pixels.");
+
+            changes[Key("Width")] = width;
+            changes[Key("Height")] = height;
+        }
+
+        if (values.TryGetValue("framerate", out var framerateText))
+        {
+            if (!double.TryParse(framerateText, NumberStyles.Float, CultureInfo.InvariantCulture, out double framerate)
+                || framerate < 0.05 || framerate > 30)
+                throw new SettingsValidationException("Frame rate must be between 0.05 and 30 frames per second.");
+
+            changes[Key("Framerate")] = framerate;
+        }
+
+        if (values.TryGetValue("quality", out var qualityText))
+        {
+            if (!double.TryParse(qualityText, NumberStyles.Float, CultureInfo.InvariantCulture, out double quality)
+                || quality < 1 || quality > 100)
+                throw new SettingsValidationException("JPEG quality must be between 1 and 100.");
+
+            changes[Key("Quality")] = (int)Math.Round(quality);
+        }
+
+        if (values.TryGetValue("rotation", out var rotationText))
+        {
+            if (!int.TryParse(rotationText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int rotation)
+                || (rotation != 0 && rotation != 180))
+                throw new SettingsValidationException("Rotation must be 0 or 180.");
+
+            changes[Key("Rotation")] = rotation;
+        }
+
+        if (values.TryGetValue("extraArgs", out var extraArgs))
+        {
+            extraArgs = (extraArgs ?? "").Trim();
+            if (extraArgs.Contains('\n') || extraArgs.Contains('\r'))
+                throw new SettingsValidationException("Extra arguments must be a single line.");
+
+            changes[Key("ExtraArgs")] = extraArgs;
+        }
+
+        if (changes.Count == 0)
+            return new SettingsApplyResult(Message: "Nothing to save.");
+
+        await _store.SaveAsync(changes, cancellationToken);
+
+        if (!_moduleLoaded)
+        {
+            return new SettingsApplyResult(
+                RestartRequired: true,
+                Message: enabled == true
+                    ? "Saved. Restart the service to load the camera module."
+                    : "Saved. The camera module is not loaded; changes take effect after a restart.");
+        }
+
+        return new SettingsApplyResult(Message: enabled == false
+            ? "Saved. The camera is stopping."
+            : "Saved. The camera restarts with the new settings.");
+    }
+
+    private string Key(string name) => _configPath + ":" + name;
+
+    private static string Resolution(RpicamCameraOptions o) => Fmt(o.Width) + "x" + Fmt(o.Height);
+
+    private static string Fmt(double value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private static bool ParseBool(string? text, string label) => text?.Trim().ToLowerInvariant() switch
+    {
+        "true" or "1" or "on" => true,
+        "false" or "0" or "off" => false,
+        _ => throw new SettingsValidationException($"{label} must be on or off."),
+    };
+
+    /// <summary>Appends the current (custom) value to the choices when it is not one of the presets.</summary>
+    private static IReadOnlyList<SettingChoice> WithCurrent(SettingChoice[] presets, string current)
+        => presets.Any(c => c.Value == current)
+            ? presets
+            : [.. presets, new SettingChoice(current, current + " (custom)")];
+}

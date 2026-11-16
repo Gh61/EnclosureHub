@@ -32,8 +32,11 @@ logs: `journalctl -u enclosurehub`. Config on the device: `/opt/enclosurehub/app
 ## Conventions
 
 - English for code, comments, docs and commit messages.
-- Keep modules independent: hardware modules only create/update entities; adapters (MQTT, HTTP) never
-  reference hardware modules. New hardware = new module + `Add…` extension + config flag in `Program.cs`.
+- Keep modules independent: hardware modules only create/update entities; adapters (MQTT, HTTP, web
+  dashboard) never reference hardware modules. New hardware = new module + `Add…` extension (honouring
+  `Modules:{Name}:Enabled`) + optional `ISettingsSection` for runtime-editable settings.
+- The web dashboard (`wwwroot`) is plain HTML/CSS/JS talking to `/api/*` only; keep it framework-free and
+  in the black/white outlined style. Secrets (MQTT, `Web:Auth`) stay file-only, never editable in the UI.
 - Entity IDs are lowercase snake_case and must stay stable (used in MQTT topics and HA unique IDs).
 - Raise `StateChanged` only on real changes (use the entity's setters).
 - Do not set `RuntimeIdentifier` in csproj files (keeps Windows debugging working).

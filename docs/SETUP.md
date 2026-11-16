@@ -104,13 +104,17 @@ sudo /opt/enclosurehub/enclosurehub --install
 (`deploy.sh … --install` / `deploy.ps1 … -Install` does both steps in one go.)
 
 Local configuration on the Pi – `/opt/enclosurehub/appsettings.Local.json`
-(not touched by deployments):
+(not touched by deployments; the web dashboard writes its settings into this file too):
 
 ```json
 {
-  "Mqtt": { "Host": "192.168.1.10", "Username": "enclosurehub", "Password": "…" }
+  "Mqtt": { "Host": "192.168.1.10", "Username": "enclosurehub", "Password": "…" },
+  "Web": { "Auth": { "Username": "admin", "Password": "…" } }
 }
 ```
+
+`Web:Auth` is optional. When set, the browser asks for the name and password once; the API, the
+camera endpoints and the dashboard all require it (only `/health` stays open).
 
 ```bash
 chmod 600 /opt/enclosurehub/appsettings.Local.json
@@ -127,7 +131,8 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 - Dashboard: *Picture Entity* / *Picture Glance* card with the camera entity.
 - Optional live view: **MJPEG IP Camera** integration with
   MJPEG URL `http://<pi>:8080/api/cameras/camera/stream.mjpeg` and
-  still image URL `http://<pi>:8080/api/cameras/camera/snapshot.jpg`.
+  still image URL `http://<pi>:8080/api/cameras/camera/snapshot.jpg`
+  (enter the `Web:Auth` name and password there if you enabled authentication).
 - Printer status: the built-in **PrusaLink** integration – combine it with these entities in automations.
 
 ## Troubleshooting
@@ -138,4 +143,7 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 | `MQTT error: … (NotAuthorized)` in the log | The broker rejects the username/password. Check the user in HA (*Settings → People → Users*) and the values in `appsettings.Local.json`; test with `mosquitto_sub -h <ha> -u … -P … -t test -C 1` |
 | Device missing in HA | `mosquitto_sub -h <ha> -u … -P … -t 'homeassistant/#' -v` |
 | Entities "unavailable" | `enclosurehub/status` must be `online` |
+| Dashboard answers 404 | `Web:Dashboard:Enabled` is false in `appsettings.Local.json` – set it to true and restart |
+| Forgot the dashboard password | Edit or remove `Web:Auth` in `appsettings.Local.json` and restart |
+| Camera settings don't apply | `journalctl -u enclosurehub` should show `Camera settings changed` followed by `Starting rpicam-vid …`; the service must be able to write `appsettings.Local.json` |
 | Service won't start | `systemctl status enclosurehub`; re-run `sudo /opt/enclosurehub/enclosurehub --install` after changing users |

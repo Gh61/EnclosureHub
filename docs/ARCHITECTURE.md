@@ -11,11 +11,11 @@
 
 ```
 src/
-  EnclosureHub.Core     Entity model, registry, camera abstraction. No dependencies.
-  EnclosureHub.Camera   Camera module: rpicam-vid → latest JPEG frame.
+  EnclosureHub.Core     Entity model, registry, camera abstraction, settings abstraction. No dependencies.
+  EnclosureHub.Camera   Camera module: rpicam-vid → latest JPEG frame; camera settings section.
   EnclosureHub.Mqtt     MQTT adapter: Home Assistant discovery, state, images (MQTTnet 4.x).
-  EnclosureHub.App      Host: configuration, DI, HTTP API, built-in system sensors module,
-                        --install/--uninstall (systemd unit generation).
+  EnclosureHub.App      Host: configuration, DI, HTTP API, web dashboard (wwwroot), Basic auth,
+                        settings store, built-in system sensors module, --install/--uninstall.
 tests/
   EnclosureHub.Tests    Unit tests (xUnit).
 deploy/                 Deploy scripts (publish + copy over SSH).
@@ -61,6 +61,23 @@ services.AddSingleton<Entity>(sp => sp.GetRequiredService<RpicamCameraService>()
 at startup, and adapters can enumerate it without synchronisation. Duplicate IDs fail at startup.
 
 `Program.cs` enables modules and adapters based on configuration (`Modules:{Name}:Enabled`, `Mqtt:Enabled`).
+A module's `Add…` method may be called unconditionally and check `Enabled` itself when it also
+registers a settings section – the camera does this so it can be turned back on from the dashboard
+(the entities are only registered when enabled; turning it on then requires a restart).
+
+## Runtime settings (`EnclosureHub.Core.Settings`)
+
+Modules can expose settings for editing at runtime without the UI knowing anything about hardware:
+
+- `ISettingsSection` – id, title, a list of `SettingField`s (toggle / number / text / choice), `GetValues()`
+  and `ApplyAsync(values)`. The module validates (`SettingsValidationException` → HTTP 400), persists
+  and applies the change. The camera section restarts rpicam-vid through `IOptionsMonitor`.
+- `ISettingsStore` – persists `"Config:Path" = value` pairs. The App implementation merges them into
+  `appsettings.Local.json` (atomic replace, file mode preserved) and calls `IConfigurationRoot.Reload()`,
+  which fires the option monitors.
+
+`GET/PUT /api/settings` exposes all sections; the dashboard renders them generically. Settings that are
+secrets or rarely change (MQTT, `Web:Auth`) are deliberately file-only.
 
 ## Adapters
 
@@ -81,6 +98,16 @@ at startup, and adapters can enumerate it without synchronisation. Duplicate IDs
   then one per change; comment keep-alives every 15 s. This is the contract for display clients –
   a display never talks to hardware or MQTT directly.
 - JSON: camelCase, enums as camelCase strings (`ApiJson.Options`).
+- `Web:Auth` (Basic authentication) wraps everything except `/health`; `Web:Dashboard:Enabled` only gates
+  the static files. Both are read per request via `IOptionsMonitor`, so a settings save applies immediately.
+
+### Web dashboard (`EnclosureHub.App/wwwroot`)
+
+Static `index.html` + `dashboard.css` + `dashboard.js`, no build step, no framework. It is a client of the
+HTTP API only (entities, SSE, camera endpoints, settings, system) and therefore also the reference
+implementation for other display clients. The look is deliberately minimal: black background, white
+text, outlined white controls, thin separators, a small green/red dot as the only accent. The MJPEG
+stream is attached only while the Camera page is visible to spare the Pi.
 
 ## Adding a module (example: PWM fan)
 

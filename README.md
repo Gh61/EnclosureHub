@@ -10,6 +10,7 @@ Built for a Prusa MK4S in an enclosure, but nothing in it is printer-specific.
 | ✅ | Camera (Raspberry Pi Camera Module via `rpicam-vid`) – snapshots, MJPEG stream |
 | ✅ | Home Assistant integration via MQTT discovery (entities appear automatically) |
 | ✅ | Local HTTP API + live event stream for displays and other clients |
+| ✅ | Web dashboard (camera view, entity status, camera settings, restart) with optional Basic auth |
 | ✅ | Controller health sensors (CPU temperature, camera running) |
 | 🛠️ | LED lighting (PWM, RGB + tunable white) |
 | 🛠️ | Enclosure fans (PWM) + temperature/humidity sensor |
@@ -65,8 +66,24 @@ Developed and tested on:
 4. On the Pi, create `/opt/enclosurehub/appsettings.Local.json` with your MQTT broker
    (see `src/EnclosureHub.App/appsettings.Local.example.json`) and restart:
    `sudo systemctl restart enclosurehub`
-5. Open `http://<pi-address>:8080` – you should see the camera.
+5. Open `http://<pi-address>:8080` – the web dashboard shows the camera.
    In Home Assistant the device **Printer Enclosure** appears under *Settings → Devices → MQTT*.
+
+## Web dashboard
+
+A small single-page UI served by the hub itself (black/white, works on phones too):
+
+- **Camera** – live MJPEG view, running indicator, snapshot link.
+- **Status** – all entities with live values (Server-Sent Events).
+- **Settings** – camera on/off, resolution, frame rate, JPEG quality, rotation, extra rpicam arguments;
+  the dashboard itself can be switched off here. Changes are written to `appsettings.Local.json`
+  and applied live (the camera process restarts within a few seconds).
+- **System** – version, host, uptime, memory and a *Restart service* button.
+
+Settings → `Web:Dashboard:Enabled` turns the UI off (the API keeps working; re-enable it in the config file).
+Set `Web:Auth:Username` / `Web:Auth:Password` to protect **everything** the server serves (dashboard, API,
+camera endpoints; only `/health` stays open) with HTTP Basic authentication. It is plain HTTP on your LAN,
+so treat it as a lock against accidental changes rather than strong security.
 
 ## Configuration
 
@@ -76,9 +93,12 @@ Developed and tested on:
 | Section | Purpose |
 |---|---|
 | `Device` | Id, name, manufacturer, model shown in Home Assistant |
-| `Modules:Camera` | `Enabled`, resolution, framerate, JPEG quality, `ExtraArgs` (e.g. `--rotation 180`) |
+| `Web` | `Dashboard:Enabled`; `Auth:Username`/`Auth:Password` (Basic auth for all endpoints except `/health`) |
+| `Modules:Camera` | `Enabled`, `Width`/`Height`, `Framerate`, `Quality`, `Rotation` (0/180), `ExtraArgs` (e.g. `--hflip --vflip`) |
 | `Modules:SystemSensors` | `Enabled`, polling interval |
 | `Mqtt` | `Enabled`, broker `Host`/`Port`/`Username`/`Password`, image interval |
+
+The dashboard edits the camera and dashboard values of `appsettings.Local.json`; everything else is file-only.
 
 Any value can also be set via environment variables, e.g. `Mqtt__Password=...`.
 
@@ -86,14 +106,18 @@ Any value can also be set via environment variables, e.g. `Mqtt__Password=...`.
 
 | Endpoint | Description |
 |---|---|
-| `GET /` | Simple status page (camera stream + live entity states) |
-| `GET /health` | Liveness check |
+| `GET /` | Web dashboard (static files; 404 when `Web:Dashboard:Enabled` is false) |
+| `GET /health` | Liveness check (never requires authentication) |
 | `GET /api/entities` | All entities with current state |
 | `GET /api/entities/{id}` | One entity |
 | `POST /api/entities/{id}/command` | Control a light or fan, e.g. `{"on":true,"brightness":200}` |
 | `GET /api/events` | Server-Sent Events – `state` event per entity on connect and on every change |
 | `GET /api/cameras/{id}/snapshot.jpg` | Latest camera frame |
 | `GET /api/cameras/{id}/stream.mjpeg` | MJPEG stream |
+| `GET /api/settings` | Settings sections (fields + current values) exposed by the modules |
+| `PUT /api/settings/{section}` | Apply settings, e.g. `{"enabled":false}` or `{"resolution":"1920x1080","quality":70}` |
+| `GET /api/system` | Version, host, uptime, memory |
+| `POST /api/system/restart` | Graceful shutdown; systemd restarts the service |
 
 ## MQTT topics
 

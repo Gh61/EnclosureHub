@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>EnclosureHub.App</RootNamespace>
     <AssemblyName>enclosurehub</AssemblyName>
+    <Version>0.2.0</Version>
 
     <!-- Raspberry Pi 2 has 1 GB RAM and 4 slow cores: workstation GC without background GC saves memory -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
@@ -22,6 +23,10 @@
   <ItemGroup>
     <!-- Local overrides live only on the device; never overwrite them on deploy -->
     <Content Update="appsettings.Local.json;appsettings.Local.example.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EnclosureHub.Tests" />
   </ItemGroup>
 
   <ItemGroup>

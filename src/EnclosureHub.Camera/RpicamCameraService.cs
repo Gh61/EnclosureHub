@@ -11,31 +11,41 @@ namespace EnclosureHub.Camera;
 /// <summary>
 /// Runs a single long-lived <c>rpicam-vid</c> process producing MJPEG on stdout and keeps
 /// the latest frame in memory. A long-lived process keeps exposure and white balance
-/// settled (no warm-up per frame). Restarts the process when it exits.
+/// settled (no warm-up per frame). Restarts the process when it exits or when the
+/// camera settings change; stops it while <see cref="RpicamCameraOptions.Enabled"/> is false.
 /// </summary>
 public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 {
-    private readonly RpicamCameraOptions _options;
+    private readonly IOptionsMonitor<RpicamCameraOptions> _options;
     private readonly ILogger<RpicamCameraService> _logger;
+    private readonly IDisposable? _optionsChange;
 
     private CameraFrame? _latestFrame;
     private TaskCompletionSource<CameraFrame> _nextFrame = NewFrameSource();
 
-    public RpicamCameraService(IOptions<RpicamCameraOptions> options, ILogger<RpicamCameraService> logger)
+    // Cancelled to interrupt the current process cycle when settings change
+    private CancellationTokenSource? _cycle;
+    private string? _activeSignature;
+
+    public RpicamCameraService(IOptionsMonitor<RpicamCameraOptions> options, ILogger<RpicamCameraService> logger)
     {
-        _options = options.Value;
+        _options = options;
         _logger = logger;
 
-        Camera = new CameraEntity(_options.Id, _options.Name, this)
+        var initial = options.CurrentValue;
+
+        Camera = new CameraEntity(initial.Id, initial.Name, this)
         {
             Icon = "mdi:cctv",
         };
 
-        RunningSensor = new BinarySensorEntity(_options.Id + "_running", _options.Name + " running")
+        RunningSensor = new BinarySensorEntity(initial.Id + "_running", initial.Name + " running")
         {
             DeviceClass = "running",
             IsDiagnostic = true,
         };
+
+        _optionsChange = options.OnChange(OnOptionsChanged);
     }
 
     public CameraEntity Camera { get; }
@@ -47,65 +57,129 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     public Task<CameraFrame> WaitForNextFrameAsync(CancellationToken cancellationToken)
         => Volatile.Read(ref _nextFrame).Task.WaitAsync(cancellationToken);
 
+    public override void Dispose()
+    {
+        _optionsChange?.Dispose();
+        base.Dispose();
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var watchdog = WatchFreshnessAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            using var cycle = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            Volatile.Write(ref _cycle, cycle);
+
+            // Read the options after publishing the cycle so a change arriving in between still interrupts it
+            var options = _options.CurrentValue;
+            string arguments = BuildArguments(options);
+            _activeSignature = Signature(options, arguments);
+
             try
             {
-                await RunProcessAsync(stoppingToken);
+                if (!options.Enabled)
+                {
+                    _logger.LogInformation("Camera is turned off (Modules:Camera:Enabled = false)");
+                    ClearFrame();
+                    await Task.Delay(Timeout.Infinite, cycle.Token);
+                }
+                else
+                {
+                    await RunProcessAsync(options, arguments, cycle.Token);
+                    _logger.LogWarning("{Exe} exited, restarting in {Delay} s", options.Executable, options.RestartDelaySeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(options.RestartDelaySeconds), cycle.Token);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Camera process failed");
-            }
-
-            _logger.LogWarning("{Exe} exited, restarting in {Delay} s", _options.Executable, _options.RestartDelaySeconds);
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(_options.RestartDelaySeconds), stoppingToken);
-            }
             catch (OperationCanceledException)
             {
-                break;
+                // settings changed – start the next cycle immediately
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Camera process failed, retrying in {Delay} s", options.RestartDelaySeconds);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(options.RestartDelaySeconds), cycle.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (stoppingToken.IsCancellationRequested)
+                        break;
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref _cycle, null);
             }
         }
 
         await watchdog;
     }
 
-    private async Task RunProcessAsync(CancellationToken stoppingToken)
+    private void OnOptionsChanged(RpicamCameraOptions options)
     {
-        string arguments = string.Join(' ',
+        if (Signature(options, BuildArguments(options)) == _activeSignature)
+            return; // e.g. another section was saved – nothing relevant changed
+
+        _logger.LogInformation("Camera settings changed, applying");
+        try
+        {
+            Volatile.Read(ref _cycle)?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // cycle just ended; the loop picks up the new options anyway
+        }
+    }
+
+    private static string Signature(RpicamCameraOptions options, string arguments)
+        => options.Enabled ? options.Executable + " " + arguments : "off";
+
+    /// <summary>Builds the rpicam-vid command line for the given options.</summary>
+    public static string BuildArguments(RpicamCameraOptions options)
+    {
+        var parts = new List<string>
+        {
             "-t 0",           // run forever
             "-n",             // no preview window
             "--codec mjpeg",
-            "--width " + _options.Width.ToString(CultureInfo.InvariantCulture),
-            "--height " + _options.Height.ToString(CultureInfo.InvariantCulture),
-            "--framerate " + _options.Framerate.ToString(CultureInfo.InvariantCulture),
-            "-q " + _options.Quality.ToString(CultureInfo.InvariantCulture),
-            _options.ExtraArgs,
-            "-o -");          // write to stdout
+            "--width " + options.Width.ToString(CultureInfo.InvariantCulture),
+            "--height " + options.Height.ToString(CultureInfo.InvariantCulture),
+            "--framerate " + options.Framerate.ToString(CultureInfo.InvariantCulture),
+            "-q " + options.Quality.ToString(CultureInfo.InvariantCulture),
+        };
 
-        var startInfo = new ProcessStartInfo(_options.Executable, arguments)
+        if (options.Rotation != 0)
+            parts.Add("--rotation " + options.Rotation.ToString(CultureInfo.InvariantCulture));
+
+        if (!string.IsNullOrWhiteSpace(options.ExtraArgs))
+            parts.Add(options.ExtraArgs.Trim());
+
+        parts.Add("-o -");    // write to stdout
+        return string.Join(' ', parts);
+    }
+
+    private async Task RunProcessAsync(RpicamCameraOptions options, string arguments, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo(options.Executable, arguments)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
 
-        _logger.LogInformation("Starting {Exe} {Args}", _options.Executable, arguments);
+        _logger.LogInformation("Starting {Exe} {Args}", options.Executable, arguments);
 
         using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Could not start " + _options.Executable);
+            ?? throw new InvalidOperationException("Could not start " + options.Executable);
 
-        using var killOnStop = stoppingToken.Register(() =>
+        using var killOnStop = cancellationToken.Register(() =>
         {
             try
             {
@@ -126,23 +200,39 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         var stdout = process.StandardOutput.BaseStream;
         int overflows = 0;
 
-        int read;
-        while ((read = await stdout.ReadAsync(buffer, stoppingToken)) > 0)
+        try
         {
-            splitter.Push(buffer.AsSpan(0, read), PublishFrame);
-
-            if (splitter.OverflowCount != overflows)
+            int read;
+            while ((read = await stdout.ReadAsync(buffer, cancellationToken)) > 0)
             {
-                overflows = splitter.OverflowCount;
-                _logger.LogWarning("Dropped an oversized frame (total {Count})", overflows);
+                splitter.Push(buffer.AsSpan(0, read), PublishFrame);
+
+                if (splitter.OverflowCount != overflows)
+                {
+                    overflows = splitter.OverflowCount;
+                    _logger.LogWarning("Dropped an oversized frame (total {Count})", overflows);
+                }
             }
         }
+        finally
+        {
+            // Make sure the process is gone before the next cycle starts (the camera can be opened only once)
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // already exited
+            }
 
-        await process.WaitForExitAsync(CancellationToken.None);
-        await stderrTask;
+            await process.WaitForExitAsync(CancellationToken.None);
+            await stderrTask;
+        }
 
-        stoppingToken.ThrowIfCancellationRequested();
-        _logger.LogWarning("{Exe} exited with code {Code}", _options.Executable, process.ExitCode);
+        cancellationToken.ThrowIfCancellationRequested();
+        _logger.LogWarning("{Exe} exited with code {Code}", options.Executable, process.ExitCode);
     }
 
     private async Task PumpStderrAsync(StreamReader stderr)
@@ -166,7 +256,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
             {
                 var frame = LatestFrame;
                 bool fresh = frame != null
-                    && (DateTime.UtcNow - frame.TimestampUtc).TotalSeconds < _options.StaleAfterSeconds;
+                    && (DateTime.UtcNow - frame.TimestampUtc).TotalSeconds < _options.CurrentValue.StaleAfterSeconds;
                 RunningSensor.SetState(fresh);
             }
         }
@@ -174,6 +264,12 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         {
             // shutting down
         }
+    }
+
+    private void ClearFrame()
+    {
+        Volatile.Write(ref _latestFrame, null);
+        RunningSensor.SetState(false);
     }
 
     private void PublishFrame(byte[] jpeg)
