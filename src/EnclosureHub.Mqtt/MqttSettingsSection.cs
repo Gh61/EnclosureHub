@@ -12,8 +12,8 @@ public sealed class MqttSettingsSection : ISettingsSection
 {
     private static readonly SettingChoice[] CameraModes =
     [
-        new("Image", "Image – JPEG pushed over MQTT (simple, for slow frame rates)"),
-        new("Link", "Link – Home Assistant fetches snapshots from this hub; stream URL as attribute"),
+        new("Image", "Image (JPEG over MQTT)"),
+        new("Link", "Link (URLs only)"),
     ];
 
     private readonly IOptionsMonitor<MqttBridgeOptions> _options;
@@ -36,8 +36,9 @@ public sealed class MqttSettingsSection : ISettingsSection
     public IReadOnlyList<SettingField> Fields { get; } =
     [
         new("cameraMode", "Camera in Home Assistant", SettingFieldType.Choice,
-            "Image sends every picture through the broker. Link only publishes URLs, so fast camera modes do not load MQTT; "
-            + "for live video add the MJPEG IP Camera integration with the stream URL.",
+            "Image sends every picture through the broker (MQTT camera). Link publishes only URLs and Home Assistant fetches "
+            + "the snapshot itself (MQTT image), so fast camera modes do not load the broker. For live video add the "
+            + "MJPEG IP Camera integration with the stream URL from the entity attributes.",
             CameraModes),
         new("imageInterval", "Image interval", SettingFieldType.Number,
             "Seconds between pictures (or snapshot links) sent to Home Assistant. Only new frames are sent.",
