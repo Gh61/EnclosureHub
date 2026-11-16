@@ -71,12 +71,6 @@ rpicam-vid -t 5000 -n --codec mjpeg --framerate 1 --width 1640 --height 1232 -o 
 
 ## 4. Deploy
 
-On the Pi (once):
-
-```bash
-sudo mkdir -p /opt/enclosurehub && sudo chown $USER /opt/enclosurehub
-```
-
 Set up SSH key login from your PC (needed by the deploy scripts, and handy for Claude Code):
 
 ```powershell
@@ -91,20 +85,26 @@ ssh-copy-id <user>@<pi>
 
 Check that sudo works without a password (default for the Imager-created user): `ssh <user>@<pi> sudo -n true && echo OK`
 
-Install the service (edit `User=` first):
+Build on your PC and copy to `/opt/enclosurehub` on the Pi (requires the .NET 10 SDK; nothing is built
+or installed on the Pi – the app is a self-contained .NET executable):
 
 ```bash
-scp deploy/enclosurehub.service <user>@<pi>:/tmp/
-ssh <user>@<pi> "sudo mv /tmp/enclosurehub.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable enclosurehub"
+./deploy/deploy.sh <user>@<pi>                 # Linux/macOS
+./deploy/deploy.ps1 -Target <user>@<pi>        # Windows
 ```
 
-Build and deploy:
+Install the systemd service (once). It runs as the user who invokes `sudo`, is enabled at boot and
+started immediately; the command also checks that `rpicam-vid` is installed:
 
 ```bash
-./deploy/deploy.sh <user>@<pi>
+ssh <user>@<pi>
+sudo /opt/enclosurehub/enclosurehub --install
 ```
 
-Local configuration on the Pi – `/opt/enclosurehub/appsettings.Local.json`:
+(`deploy.sh … --install` / `deploy.ps1 … -Install` does both steps in one go.)
+
+Local configuration on the Pi – `/opt/enclosurehub/appsettings.Local.json`
+(not touched by deployments):
 
 ```json
 {
@@ -117,6 +117,9 @@ chmod 600 /opt/enclosurehub/appsettings.Local.json
 sudo systemctl restart enclosurehub
 journalctl -u enclosurehub -f
 ```
+
+Later deployments just run the deploy script again (it stops the service, copies the new build and starts it).
+To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps `/opt/enclosurehub` and its configuration).
 
 ## 5. Home Assistant
 
@@ -134,4 +137,4 @@ journalctl -u enclosurehub -f
 | No image | `journalctl -u enclosurehub` – lines starting with `rpicam:`; run `rpicam-hello --list-cameras` |
 | Device missing in HA | `mosquitto_sub -h <ha> -u … -P … -t 'homeassistant/#' -v` |
 | Entities "unavailable" | `enclosurehub/status` must be `online` |
-| Service won't start | `systemctl status enclosurehub`; `User=` exists and is in the `video` group |
+| Service won't start | `systemctl status enclosurehub`; re-run `sudo /opt/enclosurehub/enclosurehub --install` after changing users |

@@ -22,7 +22,8 @@ dotnet build
 dotnet test
 dotnet run --project src/EnclosureHub.App
 dotnet publish src/EnclosureHub.App -c Release -r linux-arm --self-contained -p:PublishReadyToRun=true -o publish
-./deploy/deploy.sh <user>@<pi>      # or deploy/deploy.ps1 on Windows
+./deploy/deploy.sh <user>@<pi>      # or deploy/deploy.ps1 -Target <user>@<pi> on Windows
+sudo /opt/enclosurehub/enclosurehub --install   # on the Pi, once: creates/enables/starts the systemd unit
 ```
 
 Target device: Raspberry Pi 2 Model B (32-bit ARMv7, 1 GB RAM), Raspberry Pi OS Lite 13 (Trixie).

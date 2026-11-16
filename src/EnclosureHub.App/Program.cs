@@ -1,8 +1,13 @@
 using EnclosureHub.App.Api;
+using EnclosureHub.App.Install;
 using EnclosureHub.App.Modules.SystemSensors;
 using EnclosureHub.Camera;
 using EnclosureHub.Core;
 using EnclosureHub.Mqtt;
+
+// `sudo enclosurehub --install` / `--uninstall` manage the systemd service and exit
+if (ServiceInstaller.TryHandle(args, out int exitCode))
+    return exitCode;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,3 +40,4 @@ app.MapEntityApi();
 app.MapCameraApi();
 
 app.Run();
+return 0;

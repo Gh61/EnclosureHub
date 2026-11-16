@@ -48,17 +48,24 @@ Developed and tested on:
 ## Quick start
 
 1. Prepare the Pi and Home Assistant: [docs/SETUP.md](docs/SETUP.md)
-2. Build and deploy from your PC (requires [.NET 10 SDK](https://dotnet.microsoft.com/download)):
+2. Build and deploy from your PC (requires [.NET 10 SDK](https://dotnet.microsoft.com/download);
+   nothing needs to be installed on the Pi except `rpicam-apps-lite`):
 
    ```bash
-   ./deploy/deploy.sh pi@192.168.1.50        # Linux/macOS
+   ./deploy/deploy.sh pi@192.168.1.50           # Linux/macOS
    ./deploy/deploy.ps1 -Target pi@192.168.1.50  # Windows
    ```
 
-3. On the Pi, create `/opt/enclosurehub/appsettings.Local.json` with your MQTT broker
+3. On the Pi, install the systemd service (once):
+
+   ```bash
+   sudo /opt/enclosurehub/enclosurehub --install
+   ```
+
+4. On the Pi, create `/opt/enclosurehub/appsettings.Local.json` with your MQTT broker
    (see `src/EnclosureHub.App/appsettings.Local.example.json`) and restart:
    `sudo systemctl restart enclosurehub`
-4. Open `http://<pi-address>:8080` – you should see the camera.
+5. Open `http://<pi-address>:8080` – you should see the camera.
    In Home Assistant the device **Printer Enclosure** appears under *Settings → Devices → MQTT*.
 
 ## Configuration

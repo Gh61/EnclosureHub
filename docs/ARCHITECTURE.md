@@ -14,10 +14,11 @@ src/
   EnclosureHub.Core     Entity model, registry, camera abstraction. No dependencies.
   EnclosureHub.Camera   Camera module: rpicam-vid → latest JPEG frame.
   EnclosureHub.Mqtt     MQTT adapter: Home Assistant discovery, state, images (MQTTnet 4.x).
-  EnclosureHub.App      Host: configuration, DI, HTTP API, built-in system sensors module.
+  EnclosureHub.App      Host: configuration, DI, HTTP API, built-in system sensors module,
+                        --install/--uninstall (systemd unit generation).
 tests/
   EnclosureHub.Tests    Unit tests (xUnit).
-deploy/                 systemd unit, deploy scripts.
+deploy/                 Deploy scripts (publish + copy over SSH).
 ```
 
 Planned additional projects: `EnclosureHub.Gpio` (PWM lights and fans, I²C sensors),
