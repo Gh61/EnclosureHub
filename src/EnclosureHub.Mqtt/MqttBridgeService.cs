@@ -163,8 +163,11 @@ public sealed partial class MqttBridgeService : BackgroundService
     private void OnOptionsChanged(MqttBridgeOptions options)
     {
         if (options.CameraMode == _publishedCameraMode && options.PublicUrl == _publishedPublicUrl)
-            return; // nothing that affects discovery (interval is read per tick)
+            return; // nothing that affects discovery (interval is read per tick), or the reload fired twice
 
+        // Remember the target right away so a duplicate change notification does not log/queue again
+        _publishedCameraMode = options.CameraMode;
+        _publishedPublicUrl = options.PublicUrl;
         _logger.LogInformation("Home Assistant camera mode is now {Mode}, republishing discovery", options.CameraMode);
         _discoveryPending = true;
     }
