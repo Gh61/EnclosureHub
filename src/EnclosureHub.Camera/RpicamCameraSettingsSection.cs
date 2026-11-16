@@ -11,9 +11,23 @@ namespace EnclosureHub.Camera;
 /// </summary>
 public sealed class RpicamCameraSettingsSection : ISettingsSection
 {
+    private const string CustomPreset = "custom";
+
+    private sealed record Preset(string Value, string Label, int Width, int Height, double Framerate);
+
+    /// <summary>Resolution + frame rate combinations. The IMX219 delivers up to 47 fps at 1080p and 200 fps at 640×480.</summary>
+    private static readonly Preset[] Presets =
+    [
+        new("monitoring", "Monitoring – 1640 × 1232 @ 1 fps (full view, low CPU)", 1640, 1232, 1),
+        new("1080p30", "1080p30 – 1920 × 1080 @ 30 fps", 1920, 1080, 30),
+        new("720p60", "720p60 – 1280 × 720 @ 60 fps", 1280, 720, 60),
+        new("480p90", "480p90 – 640 × 480 @ 90 fps", 640, 480, 90),
+    ];
+
     private static readonly SettingChoice[] Resolutions =
     [
         new("640x480", "640 × 480"),
+        new("1280x720", "1280 × 720"),
         new("1280x960", "1280 × 960"),
         new("1640x1232", "1640 × 1232 – full view (recommended)"),
         new("1920x1080", "1920 × 1080 – cropped"),
@@ -27,6 +41,10 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
         new("1", "1 frame per second"),
         new("2", "2 frames per second"),
         new("5", "5 frames per second"),
+        new("15", "15 frames per second"),
+        new("30", "30 frames per second"),
+        new("60", "60 frames per second"),
+        new("90", "90 frames per second"),
     ];
 
     private static readonly SettingChoice[] Rotations =
@@ -69,6 +87,10 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
             [
                 new("enabled", "Camera", SettingFieldType.Toggle,
                     "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause."),
+                new("preset", "Mode", SettingFieldType.Choice,
+                    "Sets resolution and frame rate together; choose Custom to set them separately. Fast modes load the Pi 2 heavily "
+                    + "and are meant for the live stream – switch Home Assistant to the link mode for them.",
+                    [.. Presets.Select(p => new SettingChoice(p.Value, p.Label)), new SettingChoice(CustomPreset, "Custom")]),
                 new("resolution", "Resolution", SettingFieldType.Choice,
                     "1640 × 1232 shows the whole sensor area; 1920 × 1080 is a crop of the centre.",
                     WithCurrent(Resolutions, Resolution(o))),
@@ -92,6 +114,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
         return new Dictionary<string, object?>
         {
             ["enabled"] = o.Enabled,
+            ["preset"] = PresetOf(o),
             ["resolution"] = Resolution(o),
             ["framerate"] = Fmt(o.Framerate),
             ["quality"] = (double)o.Quality,
@@ -102,6 +125,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
 
     public async Task<SettingsApplyResult> ApplyAsync(IReadOnlyDictionary<string, string?> values, CancellationToken cancellationToken)
     {
+        var current = _options.CurrentValue;
         var changes = new Dictionary<string, object?>();
         bool? enabled = null;
 
@@ -111,7 +135,23 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
             changes[Key("Enabled")] = enabled.Value;
         }
 
-        if (values.TryGetValue("resolution", out var resolution))
+        // A newly chosen preset wins over the individual fields; an unchanged preset lets the fields through,
+        // so the user can tweak frame rate or resolution without first switching to "Custom".
+        bool presetApplied = false;
+        if (values.TryGetValue("preset", out var presetValue)
+            && presetValue != CustomPreset
+            && presetValue != PresetOf(current))
+        {
+            var preset = Presets.FirstOrDefault(p => p.Value == presetValue)
+                ?? throw new SettingsValidationException("Unknown camera mode.");
+
+            changes[Key("Width")] = preset.Width;
+            changes[Key("Height")] = preset.Height;
+            changes[Key("Framerate")] = preset.Framerate;
+            presetApplied = true;
+        }
+
+        if (!presetApplied && values.TryGetValue("resolution", out var resolution))
         {
             var parts = (resolution ?? "").Split('x', 'X', '×');
             if (parts.Length != 2
@@ -124,11 +164,11 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
             changes[Key("Height")] = height;
         }
 
-        if (values.TryGetValue("framerate", out var framerateText))
+        if (!presetApplied && values.TryGetValue("framerate", out var framerateText))
         {
             if (!double.TryParse(framerateText, NumberStyles.Float, CultureInfo.InvariantCulture, out double framerate)
-                || framerate < 0.05 || framerate > 30)
-                throw new SettingsValidationException("Frame rate must be between 0.05 and 30 frames per second.");
+                || framerate < 0.05 || framerate > 120)
+                throw new SettingsValidationException("Frame rate must be between 0.05 and 120 frames per second.");
 
             changes[Key("Framerate")] = framerate;
         }
@@ -180,6 +220,10 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
     }
 
     private string Key(string name) => _configPath + ":" + name;
+
+    private static string PresetOf(RpicamCameraOptions o)
+        => Presets.FirstOrDefault(p => p.Width == o.Width && p.Height == o.Height && Math.Abs(p.Framerate - o.Framerate) < 0.001)?.Value
+           ?? CustomPreset;
 
     private static string Resolution(RpicamCameraOptions o) => Fmt(o.Width) + "x" + Fmt(o.Height);
 

@@ -87,7 +87,13 @@ secrets or rarely change (MQTT, `Web:Auth`) are deliberately file-only.
 - On connect and whenever Home Assistant publishes `online` on `homeassistant/status`:
   publish discovery configs (retained), `online`, and all current states.
 - `StateChanged` → queued → state published immediately (retained).
-- Camera images published every `CameraImageIntervalSeconds`, only if a new frame exists.
+- Camera: every `CameraImageIntervalSeconds` (new frames only) either the JPEG is published
+  (`CameraMode: Image`, HA component `camera`) or a snapshot URL with a cache-busting query
+  (`CameraMode: Link`, HA component `image` with `url_topic`). Switching the mode republishes discovery
+  and clears the other component's retained config. Stream/snapshot/dashboard URLs go to
+  `{base}/{id}/attributes` in both modes; the base URL is `Mqtt:PublicUrl` or the detected LAN address.
+- Connection settings are read once; camera mode, interval and public URL come from `IOptionsMonitor`
+  and apply live (the dashboard's "Home Assistant" settings section).
 - Mapping lives in `HomeAssistantDiscovery` – adding a new entity kind means adding a case there
   (plus command handling for controllable entities, see ROADMAP).
 

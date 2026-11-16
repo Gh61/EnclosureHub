@@ -35,7 +35,7 @@ public class RpicamCameraSettingsSectionTests
     [Theory]
     [InlineData("resolution", "abc")]
     [InlineData("resolution", "10x10")]
-    [InlineData("framerate", "100")]
+    [InlineData("framerate", "500")]
     [InlineData("quality", "0")]
     [InlineData("rotation", "90")]
     [InlineData("enabled", "maybe")]
@@ -48,6 +48,45 @@ public class RpicamCameraSettingsSectionTests
             section.ApplyAsync(new Dictionary<string, string?> { [key] = value }, CancellationToken.None));
 
         Assert.Empty(store.Saved);
+    }
+
+    [Fact]
+    public async Task New_preset_overrides_resolution_and_framerate()
+    {
+        var store = new FakeStore();
+        var section = new RpicamCameraSettingsSection(new Monitor(new RpicamCameraOptions()), store, "Modules:Camera", moduleLoaded: true);
+        Assert.Equal("monitoring", section.GetValues()["preset"]);
+
+        // The UI sends the (stale) individual fields along with the newly chosen preset
+        await section.ApplyAsync(new Dictionary<string, string?>
+        {
+            ["preset"] = "720p60",
+            ["resolution"] = "1640x1232",
+            ["framerate"] = "1",
+        }, CancellationToken.None);
+
+        Assert.Equal(1280, store.Saved["Modules:Camera:Width"]);
+        Assert.Equal(720, store.Saved["Modules:Camera:Height"]);
+        Assert.Equal(60.0, store.Saved["Modules:Camera:Framerate"]);
+    }
+
+    [Fact]
+    public async Task Unchanged_preset_lets_individual_fields_through()
+    {
+        var store = new FakeStore();
+        var options = new RpicamCameraOptions { Width = 1920, Height = 1080, Framerate = 30 };
+        var section = new RpicamCameraSettingsSection(new Monitor(options), store, "Modules:Camera", moduleLoaded: true);
+        Assert.Equal("1080p30", section.GetValues()["preset"]);
+
+        await section.ApplyAsync(new Dictionary<string, string?>
+        {
+            ["preset"] = "1080p30",
+            ["resolution"] = "1920x1080",
+            ["framerate"] = "15",
+        }, CancellationToken.None);
+
+        Assert.Equal(15.0, store.Saved["Modules:Camera:Framerate"]);
+        Assert.Equal("custom", new RpicamCameraSettingsSection(new Monitor(new RpicamCameraOptions { Width = 1920, Height = 1080, Framerate = 15 }), store, "Modules:Camera", true).GetValues()["preset"]);
     }
 
     [Fact]

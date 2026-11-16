@@ -129,6 +129,10 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 
 - *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera running, CPU temperature.
 - Dashboard: *Picture Entity* / *Picture Glance* card with the camera entity.
+- Fast camera modes (1080p30, 720p60, 480p90 in the hub's *Settings → Camera*): switch *Settings → Home Assistant →
+  Camera in Home Assistant* to **Link**. The camera then appears as an MQTT *image* entity that Home Assistant
+  fetches from the hub every few seconds, and its attributes contain `stream_url` for the MJPEG integration below.
+  If `Web:Auth` is enabled, put the credentials into the hub address (`http://user:password@<pi>:8080`) so HA can fetch.
 - Optional live view: **MJPEG IP Camera** integration with
   MJPEG URL `http://<pi>:8080/api/cameras/camera/stream.mjpeg` and
   still image URL `http://<pi>:8080/api/cameras/camera/snapshot.jpg`

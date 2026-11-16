@@ -1,8 +1,11 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using EnclosureHub.Core;
 using EnclosureHub.Core.Entities;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -14,32 +17,42 @@ namespace EnclosureHub.Mqtt;
 
 /// <summary>
 /// Publishes all registered entities to an MQTT broker using Home Assistant MQTT discovery.
-/// Keeps the connection alive, republishes discovery when Home Assistant restarts,
-/// pushes state changes immediately and camera images periodically.
+/// Keeps the connection alive, republishes discovery when Home Assistant restarts or the camera
+/// publishing mode changes, pushes state changes immediately and camera images (or snapshot URLs)
+/// periodically. Connection settings are read once at startup; camera mode, interval and public URL
+/// are applied live.
 /// </summary>
-public sealed class MqttBridgeService : BackgroundService
+public sealed partial class MqttBridgeService : BackgroundService
 {
     private static readonly TimeSpan IdleWakeup = TimeSpan.FromSeconds(5);
 
-    private readonly MqttBridgeOptions _options;
+    private readonly IOptionsMonitor<MqttBridgeOptions> _optionsMonitor;
+    private readonly MqttBridgeOptions _options; // connection settings, fixed for the lifetime of the service
     private readonly DeviceOptions _device;
     private readonly IEntityRegistry _registry;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<MqttBridgeService> _logger;
     private readonly IMqttClient _client;
     private readonly MqttTopics _topics;
     private readonly Channel<Entity> _changed = Channel.CreateUnbounded<Entity>();
+    private readonly IDisposable? _optionsChange;
 
     private volatile bool _discoveryPending = true;
+    private CameraPublishMode _publishedCameraMode;
+    private string _publishedPublicUrl = "";
 
     public MqttBridgeService(
-        IOptions<MqttBridgeOptions> options,
+        IOptionsMonitor<MqttBridgeOptions> options,
         IOptions<DeviceOptions> device,
         IEntityRegistry registry,
+        IConfiguration configuration,
         ILogger<MqttBridgeService> logger)
     {
-        _options = options.Value;
+        _optionsMonitor = options;
+        _options = options.CurrentValue;
         _device = device.Value;
         _registry = registry;
+        _configuration = configuration;
         _logger = logger;
 
         string baseTopic = string.IsNullOrWhiteSpace(_options.BaseTopic) ? _device.Id : _options.BaseTopic;
@@ -53,6 +66,10 @@ public sealed class MqttBridgeService : BackgroundService
                 _logger.LogWarning("MQTT disconnected: {Reason}", e.ReasonString ?? e.Reason.ToString());
             return Task.CompletedTask;
         };
+
+        _publishedCameraMode = _options.CameraMode;
+        _publishedPublicUrl = _options.PublicUrl;
+        _optionsChange = options.OnChange(OnOptionsChanged);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -138,8 +155,18 @@ public sealed class MqttBridgeService : BackgroundService
 
     public override void Dispose()
     {
+        _optionsChange?.Dispose();
         _client.Dispose();
         base.Dispose();
+    }
+
+    private void OnOptionsChanged(MqttBridgeOptions options)
+    {
+        if (options.CameraMode == _publishedCameraMode && options.PublicUrl == _publishedPublicUrl)
+            return; // nothing that affects discovery (interval is read per tick)
+
+        _logger.LogInformation("Home Assistant camera mode is now {Mode}, republishing discovery", options.CameraMode);
+        _discoveryPending = true;
     }
 
     private void OnEntityStateChanged(object? sender, EventArgs e)
@@ -212,20 +239,37 @@ public sealed class MqttBridgeService : BackgroundService
 
     private async Task PublishDiscoveryAsync(CancellationToken cancellationToken)
     {
+        var current = _optionsMonitor.CurrentValue;
+        var cameraMode = current.CameraMode;
+        string publicUrl = ResolvePublicUrl(current.PublicUrl);
+
         foreach (var entity in _registry.All)
         {
-            string? component = HomeAssistantDiscovery.GetComponent(entity);
+            string? component = HomeAssistantDiscovery.GetComponent(entity, cameraMode);
             if (component == null)
             {
                 _logger.LogWarning("Entity {Id} ({Kind}) is not supported by the MQTT bridge yet", entity.Id, entity.Kind);
                 continue;
             }
 
-            var config = HomeAssistantDiscovery.BuildConfig(entity, _topics, _device);
+            var config = HomeAssistantDiscovery.BuildConfig(entity, _topics, _device, cameraMode);
             await PublishAsync(_topics.DiscoveryConfig(component, entity.Id), JsonSerializer.Serialize(config), retain: true, cancellationToken);
+
+            if (entity is CameraEntity camera)
+            {
+                // A camera is either an MQTT "camera" (image bytes) or an "image" (URL); clear the other retained
+                // config so Home Assistant shows exactly one entity after a mode switch.
+                await PublishAsync(_topics.DiscoveryConfig(HomeAssistantDiscovery.OtherCameraComponent(cameraMode), entity.Id), [], retain: true, cancellationToken);
+
+                var attributes = HomeAssistantDiscovery.BuildCameraAttributes(camera, publicUrl);
+                await PublishAsync(_topics.Attributes(entity.Id), JsonSerializer.Serialize(attributes), retain: true, cancellationToken);
+            }
         }
 
-        _logger.LogInformation("Published Home Assistant discovery for {Count} entities", _registry.All.Count);
+        _publishedCameraMode = cameraMode;
+        _publishedPublicUrl = current.PublicUrl;
+        _logger.LogInformation("Published Home Assistant discovery for {Count} entities (camera mode {Mode}, hub URL {Url})",
+            _registry.All.Count, cameraMode, publicUrl);
     }
 
     private Task PublishStateAsync(Entity entity, CancellationToken cancellationToken)
@@ -243,13 +287,17 @@ public sealed class MqttBridgeService : BackgroundService
             return;
 
         var lastSent = new Dictionary<string, DateTime>();
-        var interval = TimeSpan.FromSeconds(Math.Max(1, _options.CameraImageIntervalSeconds));
-        using var timer = new PeriodicTimer(interval);
+        using var timer = new PeriodicTimer(IntervalOf(_optionsMonitor.CurrentValue));
 
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
+                var current = _optionsMonitor.CurrentValue;
+                var interval = IntervalOf(current);
+                if (timer.Period != interval)
+                    timer.Period = interval;
+
                 if (!_client.IsConnected)
                     continue;
 
@@ -262,7 +310,18 @@ public sealed class MqttBridgeService : BackgroundService
 
                     try
                     {
-                        await PublishAsync(_topics.Image(camera.Id), frame.Jpeg, retain: false, stoppingToken);
+                        if (current.CameraMode == CameraPublishMode.Link)
+                        {
+                            // A changing query string makes Home Assistant fetch a fresh picture
+                            string url = HomeAssistantDiscovery.SnapshotUrl(camera, ResolvePublicUrl(current.PublicUrl))
+                                + "?t=" + frame.TimestampUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+                            await PublishAsync(_topics.Url(camera.Id), url, retain: true, stoppingToken);
+                        }
+                        else
+                        {
+                            await PublishAsync(_topics.Image(camera.Id), frame.Jpeg, retain: false, stoppingToken);
+                        }
+
                         lastSent[camera.Id] = frame.TimestampUtc;
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -277,6 +336,29 @@ public sealed class MqttBridgeService : BackgroundService
             // shutting down
         }
     }
+
+    private static TimeSpan IntervalOf(MqttBridgeOptions options)
+        => TimeSpan.FromSeconds(Math.Max(1, options.CameraImageIntervalSeconds));
+
+    /// <summary>Configured public URL, or http://{first LAN IPv4}:{listening port}.</summary>
+    internal string ResolvePublicUrl(string configured)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.Trim().TrimEnd('/');
+
+        string host = LocalNetwork.FindLocalIPv4()?.ToString() ?? Environment.MachineName;
+        return $"http://{host}:{ListeningPort()}";
+    }
+
+    private int ListeningPort()
+    {
+        string urls = _configuration["Urls"] ?? _configuration["ASPNETCORE_URLS"] ?? "";
+        var match = PortRegex().Match(urls);
+        return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : 8080;
+    }
+
+    [GeneratedRegex(@":(\d+)")]
+    private static partial Regex PortRegex();
 
     private Task PublishAsync(string topic, string payload, bool retain, CancellationToken cancellationToken)
         => PublishAsync(topic, Encoding.UTF8.GetBytes(payload), retain, cancellationToken);

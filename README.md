@@ -96,9 +96,26 @@ so treat it as a lock against accidental changes rather than strong security.
 | `Web` | `Dashboard:Enabled`; `Auth:Username`/`Auth:Password` (Basic auth for all endpoints except `/health`) |
 | `Modules:Camera` | `Enabled`, `Width`/`Height`, `Framerate`, `Quality`, `Rotation` (0/180), `ExtraArgs` (e.g. `--hflip --vflip`) |
 | `Modules:SystemSensors` | `Enabled`, polling interval |
-| `Mqtt` | `Enabled`, broker `Host`/`Port`/`Username`/`Password`, image interval |
+| `Mqtt` | `Enabled`, broker `Host`/`Port`/`Username`/`Password`; `CameraMode` (`Image`/`Link`), `CameraImageIntervalSeconds`, `PublicUrl` |
 
-The dashboard edits the camera and dashboard values of `appsettings.Local.json`; everything else is file-only.
+The dashboard edits the camera, Home Assistant camera-mode and dashboard values of `appsettings.Local.json`;
+everything else (broker, passwords) is file-only.
+
+### Camera modes and Home Assistant
+
+The camera has presets – *Monitoring* (1640 × 1232 @ 1 fps), *1080p30*, *720p60*, *480p90* – or a custom
+resolution/frame rate. Fast modes are for the live MJPEG stream (dashboard, browser, Home Assistant's
+*MJPEG IP Camera* integration) and load the Pi 2 noticeably; pushing every frame through MQTT at those
+rates makes no sense, so `Mqtt:CameraMode` chooses how Home Assistant sees the camera:
+
+| `CameraMode` | Home Assistant entity | What is published |
+|---|---|---|
+| `Image` (default) | MQTT **camera** | JPEG bytes on `…/camera/image` every `CameraImageIntervalSeconds` (new frames only) |
+| `Link` | MQTT **image** | A snapshot URL on `…/camera/url` (HA downloads the picture itself); nothing heavy goes through the broker |
+
+In both modes the entity carries the attributes `stream_url`, `snapshot_url` and `dashboard_url`, built from
+`Mqtt:PublicUrl` (auto-detected LAN address + port when empty). For live video in Home Assistant add the
+**MJPEG IP Camera** integration with `stream_url`.
 
 Any value can also be set via environment variables, e.g. `Mqtt__Password=...`.
 
@@ -127,8 +144,10 @@ With the default `Device:Id` = `enclosurehub`:
 |---|---|
 | `enclosurehub/status` | `online` / `offline` (retained, last will) |
 | `enclosurehub/{entity}/state` | Entity state (retained) |
-| `enclosurehub/{entity}/image` | Camera JPEG (every `CameraImageIntervalSeconds`, new frames only) |
-| `homeassistant/{component}/enclosurehub/{entity}/config` | Home Assistant discovery (retained) |
+| `enclosurehub/{entity}/image` | Camera JPEG (every `CameraImageIntervalSeconds`, new frames only; `CameraMode: Image`) |
+| `enclosurehub/{entity}/url` | Snapshot URL for Home Assistant to fetch (retained; `CameraMode: Link`) |
+| `enclosurehub/{entity}/attributes` | Camera attributes: `stream_url`, `snapshot_url`, `dashboard_url` (retained) |
+| `homeassistant/{component}/enclosurehub/{entity}/config` | Home Assistant discovery (retained); camera uses component `camera` or `image` |
 
 ## Development
 

@@ -136,7 +136,8 @@
             el('span', { class: 'name' }, [dot, camera.name]),
             text,
             el('span', { class: 'spacer' }),
-            el('a', { href: `/api/cameras/${encodeURIComponent(camera.id)}/snapshot.jpg`, target: '_blank', rel: 'noopener', text: 'Open snapshot' }),
+            el('a', { href: `/api/cameras/${encodeURIComponent(camera.id)}/snapshot.jpg`, target: '_blank', rel: 'noopener', text: 'Snapshot URL' }),
+            el('a', { href: `/api/cameras/${encodeURIComponent(camera.id)}/stream.mjpeg`, target: '_blank', rel: 'noopener', text: 'Stream URL' }),
             el('a', { href: '#settings', text: 'Settings' }),
           ]),
         ]);
