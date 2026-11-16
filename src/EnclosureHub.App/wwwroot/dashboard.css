@@ -97,8 +97,9 @@ h2 {
 .rows { display: block; }
 
 .row {
+  /* Text column keeps at least 55 %; controls never push it narrower (long <option> labels) */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
   gap: 8px 32px;
   align-items: start;
   padding: 18px 0;
@@ -114,9 +115,12 @@ h2 {
   align-items: center;
   gap: 12px;
   justify-content: flex-end;
-  min-width: 180px;
+  min-width: 0;
   padding-top: 2px;
 }
+.control select,
+.control input[type="text"] { width: 100%; max-width: 320px; min-width: 0; }
+.control .note { flex: 1; min-width: 0; }
 
 .value { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
@@ -192,8 +196,7 @@ input[type="number"] {
 }
 .btn-link:hover { color: var(--fg); text-decoration: underline; }
 
-select { min-width: 200px; padding-right: 28px; }
-input[type="text"] { min-width: 220px; }
+select { padding-right: 28px; text-overflow: ellipsis; }
 input[type="number"] { width: 110px; }
 
 .toggle[aria-checked="true"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 8px; display: inline-block; vertical-align: 1px; }

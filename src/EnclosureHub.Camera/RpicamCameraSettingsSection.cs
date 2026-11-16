@@ -18,10 +18,10 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
     /// <summary>Resolution + frame rate combinations. The IMX219 delivers up to 47 fps at 1080p and 200 fps at 640×480.</summary>
     private static readonly Preset[] Presets =
     [
-        new("monitoring", "Monitoring – 1640 × 1232 @ 1 fps (full view, low CPU)", 1640, 1232, 1),
-        new("1080p30", "1080p30 – 1920 × 1080 @ 30 fps", 1920, 1080, 30),
-        new("720p60", "720p60 – 1280 × 720 @ 60 fps", 1280, 720, 60),
-        new("480p90", "480p90 – 640 × 480 @ 90 fps", 640, 480, 90),
+        new("monitoring", "Monitoring – 1640×1232 @ 1 fps", 1640, 1232, 1),
+        new("1080p30", "1080p30 – 1920×1080 @ 30 fps", 1920, 1080, 30),
+        new("720p60", "720p60 – 1280×720 @ 60 fps", 1280, 720, 60),
+        new("480p90", "480p90 – 640×480 @ 90 fps", 640, 480, 90),
     ];
 
     private static readonly SettingChoice[] Resolutions =
@@ -88,8 +88,8 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
                 new("enabled", "Camera", SettingFieldType.Toggle,
                     "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause."),
                 new("preset", "Mode", SettingFieldType.Choice,
-                    "Sets resolution and frame rate together; choose Custom to set them separately. Fast modes load the Pi 2 heavily "
-                    + "and are meant for the live stream – switch Home Assistant to the link mode for them.",
+                    "Monitoring shows the full sensor view at low CPU. The fast modes are for the live stream (a Pi 2 "
+                    + "manages roughly 35 fps at 720p) – use the Home Assistant link mode with them. Custom: set the fields below.",
                     [.. Presets.Select(p => new SettingChoice(p.Value, p.Label)), new SettingChoice(CustomPreset, "Custom")]),
                 new("resolution", "Resolution", SettingFieldType.Choice,
                     "1640 × 1232 shows the whole sensor area; 1920 × 1080 is a crop of the centre.",
