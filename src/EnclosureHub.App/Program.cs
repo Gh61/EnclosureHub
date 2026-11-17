@@ -45,7 +45,11 @@ var app = builder.Build();
 app.UseBasicAuth();        // Web:Auth – everything except /health
 app.UseDashboardSwitch();  // Web:Dashboard:Enabled – static files only, API stays
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // Always revalidate (ETag) so a deployed dashboard update is picked up on the next page load
+    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache",
+});
 
 app.MapGet("/health", (IEntityRegistry registry) => Results.Json(new { status = "ok", entities = registry.All.Count }));
 app.MapEntityApi();
