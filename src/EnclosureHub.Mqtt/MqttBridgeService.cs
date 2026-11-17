@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using EnclosureHub.Core;
+using EnclosureHub.Core.Camera;
 using EnclosureHub.Core.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -311,12 +312,21 @@ public sealed partial class MqttBridgeService : BackgroundService
             _registry.All.Count, cameraMode, publicUrl);
     }
 
-    private Task PublishStateAsync(Entity entity, CancellationToken cancellationToken)
+    private async Task PublishStateAsync(Entity entity, CancellationToken cancellationToken)
     {
+        if (entity is CameraEntity camera)
+        {
+            // A camera has no state topic; its "state" is availability. While it is off, Home Assistant shows
+            // the entity as unavailable and – in image mode – a "CAMERA OFF" picture instead of the last frame.
+            await PublishAsync(_topics.EntityAvailability(camera.Id), camera.IsAvailable ? "online" : "offline", retain: true, cancellationToken);
+            if (!camera.IsAvailable && _optionsMonitor.CurrentValue.CameraMode == CameraPublishMode.Image)
+                await PublishAsync(_topics.Image(camera.Id), CameraPlaceholder.OffJpeg, retain: false, cancellationToken);
+            return;
+        }
+
         string? payload = HomeAssistantDiscovery.FormatState(entity);
-        return payload == null
-            ? Task.CompletedTask
-            : PublishAsync(_topics.State(entity.Id), payload, retain: true, cancellationToken);
+        if (payload != null)
+            await PublishAsync(_topics.State(entity.Id), payload, retain: true, cancellationToken);
     }
 
     private async Task PublishCameraImagesAsync(CancellationToken stoppingToken)

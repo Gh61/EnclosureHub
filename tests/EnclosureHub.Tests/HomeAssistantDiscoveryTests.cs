@@ -84,7 +84,30 @@ public class HomeAssistantDiscoveryTests
         Assert.False(json.TryGetProperty("url_topic", out _));
         Assert.False(json.TryGetProperty("state_topic", out _));
 
+        // Device status AND the camera's own availability must both be online
+        Assert.False(json.TryGetProperty("availability_topic", out _));
+        Assert.Equal("all", json.GetProperty("availability_mode").GetString());
+        var availability = json.GetProperty("availability").EnumerateArray().Select(a => a.GetProperty("topic").GetString()).ToList();
+        Assert.Equal(["enclosurehub/status", "enclosurehub/camera/available"], availability);
+
         Assert.Null(HomeAssistantDiscovery.FormatState(camera));
+    }
+
+    [Fact]
+    public void Camera_availability_changes_raise_state_changed_once()
+    {
+        var camera = new CameraEntity("camera", "Camera", new NoFrames());
+        int raised = 0;
+        camera.StateChanged += (_, _) => raised++;
+
+        Assert.True(camera.IsAvailable);
+        camera.SetAvailable(false);
+        camera.SetAvailable(false);
+        camera.SetAvailable(true);
+
+        Assert.Equal(2, raised);
+        Assert.True(CameraPlaceholder.OffJpeg.Length > 1000);
+        Assert.Equal(new byte[] { 0xFF, 0xD8 }, CameraPlaceholder.OffJpeg[..2]);
     }
 
     [Fact]

@@ -1,11 +1,12 @@
 using System.Text;
 using EnclosureHub.Core;
+using EnclosureHub.Core.Camera;
 using EnclosureHub.Core.Entities;
 
 namespace EnclosureHub.App.Api;
 
 /// <summary>
-///   GET /api/cameras/{id}/snapshot.jpg – latest frame (503 until the first frame)
+///   GET /api/cameras/{id}/snapshot.jpg – latest frame ("CAMERA OFF" picture while switched off, 503 until the first frame)
 ///   GET /api/cameras/{id}/stream.mjpeg – multipart MJPEG stream of new frames
 /// </summary>
 internal static class CameraApi
@@ -21,11 +22,16 @@ internal static class CameraApi
             if (registry.Find(id) is not CameraEntity camera)
                 return Results.NotFound();
 
+            context.Response.Headers.CacheControl = "no-cache, no-store";
+
+            // Switched off: a "CAMERA OFF" picture rather than an error, so still-image clients show something sensible
+            if (!camera.IsAvailable)
+                return Results.File(CameraPlaceholder.OffJpeg, "image/jpeg");
+
             var frame = camera.Source.LatestFrame;
             if (frame == null)
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
 
-            context.Response.Headers.CacheControl = "no-cache, no-store";
             return Results.File(frame.Jpeg, "image/jpeg");
         });
 

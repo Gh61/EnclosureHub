@@ -21,6 +21,9 @@ internal sealed class MqttTopics
 
     public string Availability => Base + "/status";
 
+    /// <summary>Per-entity availability (cameras: offline while switched off), combined with the device status.</summary>
+    public string EntityAvailability(string entityId) => $"{Base}/{entityId}/available";
+
     /// <summary>Home Assistant publishes "online" here after it (re)starts.</summary>
     public string HomeAssistantStatus => DiscoveryPrefix + "/status";
 

@@ -24,7 +24,8 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
 - **Home Assistant** – MQTT discovery; the device *Printer Enclosure* with Camera, a **Camera active**
   switch, *CPU temperature* and *Wi-Fi signal* shows up without any YAML. The switch turns the camera on
   and off from HA (e.g. only while the printer prints) and its state tells whether frames are really
-  flowing – ON again while it is on but stuck restarts the capture. Availability (last will), retained states, discovery
+  flowing – ON again while it is on but stuck restarts the capture. While the camera is off, HA shows the
+  camera entity as unavailable and a "CAMERA OFF" picture instead of the last frame. Availability (last will), retained states, discovery
   republished when HA restarts. Camera either as an MQTT camera (JPEG pushed every few seconds) or in
   *link* mode (HA fetches snapshots itself; stream URL as an attribute) for fast camera modes.
 - **Web dashboard** – black-and-white single-page UI served by the hub: live camera, entity status via
@@ -174,7 +175,7 @@ In both modes the entity carries the attributes `stream_url`, `snapshot_url` and
 | `GET /api/entities/{id}` | One entity |
 | `POST /api/entities/{id}/command` | Control a switch, light or fan, e.g. `{"on":true}` or `{"on":true,"brightness":200}` |
 | `GET /api/events` | Server-Sent Events – `state` event per entity on connect and on every change |
-| `GET /api/cameras/{id}/snapshot.jpg` | Latest camera frame |
+| `GET /api/cameras/{id}/snapshot.jpg` | Latest camera frame; a "CAMERA OFF" picture while the camera is switched off |
 | `GET /api/cameras/{id}/stream.mjpeg` | MJPEG stream |
 | `GET /api/settings` | Settings sections (fields + current values) exposed by the modules |
 | `PUT /api/settings/{section}` | Apply settings, e.g. `{"enabled":false}` or `{"preset":"720p60"}` |
@@ -189,6 +190,7 @@ With the default `Device:Id` = `enclosurehub`:
 |---|---|
 | `enclosurehub/status` | `online` / `offline` (retained, last will) |
 | `enclosurehub/{entity}/state` | Entity state (retained) |
+| `enclosurehub/{entity}/available` | Per-entity availability; the camera is `offline` while switched off, so HA shows *unavailable* instead of the last frame (retained) |
 | `enclosurehub/{entity}/set` | Commands from Home Assistant; switches accept `ON` / `OFF` (e.g. `enclosurehub/camera_active/set`) |
 | `enclosurehub/{entity}/image` | Camera JPEG (every `CameraImageIntervalSeconds`, new frames only; `CameraMode: Image`) |
 | `enclosurehub/{entity}/url` | Snapshot URL for Home Assistant to fetch (retained; `CameraMode: Link`) |

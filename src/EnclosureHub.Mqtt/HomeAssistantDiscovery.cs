@@ -57,6 +57,15 @@ internal static class HomeAssistantDiscovery
                 else
                     config["topic"] = topics.Image(entity.Id);
                 config["json_attributes_topic"] = topics.Attributes(entity.Id);
+
+                // Unavailable while the camera is switched off (instead of showing the last frame forever)
+                config.Remove("availability_topic");
+                config["availability"] = new[]
+                {
+                    new Dictionary<string, object?> { ["topic"] = topics.Availability },
+                    new Dictionary<string, object?> { ["topic"] = topics.EntityAvailability(entity.Id) },
+                };
+                config["availability_mode"] = "all";
                 break;
 
             case SensorEntity sensor:

@@ -4,4 +4,9 @@
     <RootNamespace>EnclosureHub.Core</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Shown instead of a stale frame while the camera is switched off -->
+    <EmbeddedResource Include="Resources\camera-off.jpg" />
+  </ItemGroup>
+
 </Project>

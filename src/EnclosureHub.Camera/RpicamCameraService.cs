@@ -46,7 +46,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         ActiveSwitch.IsConfiguredOn = () => _options.CurrentValue.Active;
         ActiveSwitch.RestartCapture = RestartCapture;
         Volatile.Write(ref _captureStartedTicks, DateTime.UtcNow.Ticks);
-        ActiveSwitch.Reflect(initial.Active);
+        SetRunning(initial.Active);
 
         _optionsChange = options.OnChange(OnOptionsChanged);
     }
@@ -92,7 +92,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
                 else
                 {
                     Volatile.Write(ref _captureStartedTicks, DateTime.UtcNow.Ticks);
-                    ActiveSwitch.Reflect(true); // on trust until the grace period ends
+                    SetRunning(true); // on trust until the grace period ends
                     await RunProcessAsync(options, arguments, cycle.Token);
                     _logger.LogWarning("{Exe} exited, restarting in {Delay} s", options.Executable, options.RestartDelaySeconds);
                     await Task.Delay(TimeSpan.FromSeconds(options.RestartDelaySeconds), cycle.Token);
@@ -275,7 +275,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
                 var options = _options.CurrentValue;
                 if (!options.Active)
                 {
-                    ActiveSwitch.Reflect(false);
+                    SetRunning(false);
                     continue;
                 }
 
@@ -283,7 +283,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
                 var frame = LatestFrame;
                 bool fresh = frame != null && (now - frame.TimestampUtc).TotalSeconds < options.StaleAfterSeconds;
                 bool starting = (now - new DateTime(Volatile.Read(ref _captureStartedTicks), DateTimeKind.Utc)).TotalSeconds < options.StaleAfterSeconds;
-                ActiveSwitch.Reflect(fresh || starting);
+                SetRunning(fresh || starting);
             }
         }
         catch (OperationCanceledException)
@@ -295,7 +295,14 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     private void ClearFrame()
     {
         Volatile.Write(ref _latestFrame, null);
-        ActiveSwitch.Reflect(false);
+        SetRunning(false);
+    }
+
+    /// <summary>One source of truth for "the camera works": the switch state and the camera entity's availability.</summary>
+    private void SetRunning(bool running)
+    {
+        ActiveSwitch.Reflect(running);
+        Camera.SetAvailable(running);
     }
 
     private void PublishFrame(byte[] jpeg)

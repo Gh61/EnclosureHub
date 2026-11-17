@@ -94,6 +94,11 @@ secrets or rarely change (MQTT, `Web:Auth`) are deliberately file-only.
   its options monitor – the same path the dashboard and the HTTP command use. Its state is the *real*
   state (frames arriving within `StaleAfterSeconds`, with the same grace period after a start), so one
   entity covers both "switched on" and "running"; ON sent to an already-on but stuck camera restarts rpicam-vid.
+- Camera availability: the discovery config lists the device status *and* `{base}/{id}/available`
+  (`availability_mode: all`). The camera module sets `CameraEntity.IsAvailable` together with the
+  switch state; while false the bridge publishes `offline` and, in image mode, the embedded
+  "CAMERA OFF" JPEG (`CameraPlaceholder.OffJpeg`, also served by the snapshot endpoint) so no stale
+  frame survives on a dashboard.
 - Camera: every `CameraImageIntervalSeconds` (new frames only) either the JPEG is published
   (`CameraMode: Image`, HA component `camera`) or a snapshot URL with a cache-busting query
   (`CameraMode: Link`, HA component `image` with `url_topic`). Switching the mode republishes discovery
