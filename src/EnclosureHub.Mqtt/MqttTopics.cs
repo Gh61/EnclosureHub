@@ -37,6 +37,27 @@ internal sealed class MqttTopics
 
     public string Command(string entityId) => $"{Base}/{entityId}/set";
 
+    /// <summary>Subscription filter matching every entity's command topic.</summary>
+    public string CommandFilter => Base + "/+/set";
+
+    /// <summary>Extracts the entity id from "{base}/{entity}/set"; false for any other topic.</summary>
+    public bool TryParseCommand(string topic, out string entityId)
+    {
+        entityId = "";
+        string prefix = Base + "/";
+        const string suffix = "/set";
+
+        if (!topic.StartsWith(prefix, StringComparison.Ordinal) || !topic.EndsWith(suffix, StringComparison.Ordinal))
+            return false;
+
+        string middle = topic[prefix.Length..^suffix.Length];
+        if (middle.Length == 0 || middle.Contains('/'))
+            return false;
+
+        entityId = middle;
+        return true;
+    }
+
     public string DiscoveryConfig(string component, string entityId)
         => $"{DiscoveryPrefix}/{component}/{DeviceId}/{entityId}/config";
 }

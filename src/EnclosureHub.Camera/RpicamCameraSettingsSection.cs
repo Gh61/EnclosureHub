@@ -56,20 +56,16 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
     private readonly IOptionsMonitor<RpicamCameraOptions> _options;
     private readonly ISettingsStore _store;
     private readonly string _configPath;
-    private readonly bool _moduleLoaded;
 
     /// <param name="configPath">Configuration path of the options, e.g. "Modules:Camera".</param>
-    /// <param name="moduleLoaded">False when the module was disabled at startup (entities not registered).</param>
     public RpicamCameraSettingsSection(
         IOptionsMonitor<RpicamCameraOptions> options,
         ISettingsStore store,
-        string configPath,
-        bool moduleLoaded)
+        string configPath)
     {
         _options = options;
         _store = store;
         _configPath = configPath;
-        _moduleLoaded = moduleLoaded;
     }
 
     public string Id => "camera";
@@ -85,8 +81,9 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
             var o = _options.CurrentValue;
             return
             [
-                new("enabled", "Camera", SettingFieldType.Toggle,
-                    "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause."),
+                new("active", "Camera", SettingFieldType.Toggle,
+                    "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause. "
+                    + "The same switch is available in Home Assistant and on the Camera page."),
                 new("preset", "Mode", SettingFieldType.Choice,
                     "Monitoring = 1640 × 1232 at 1 fps, full sensor view, low CPU. 1080p30, 720p60 and 480p90 are for the live "
                     + "stream (a Pi 2 manages roughly 35 fps at 720p) – use the Home Assistant link mode with them. Custom: set the fields below.",
@@ -113,7 +110,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
         var o = _options.CurrentValue;
         return new Dictionary<string, object?>
         {
-            ["enabled"] = o.Enabled,
+            ["active"] = o.Active,
             ["preset"] = PresetOf(o),
             ["resolution"] = Resolution(o),
             ["framerate"] = Fmt(o.Framerate),
@@ -127,12 +124,12 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
     {
         var current = _options.CurrentValue;
         var changes = new Dictionary<string, object?>();
-        bool? enabled = null;
+        bool? active = null;
 
-        if (values.TryGetValue("enabled", out var enabledText))
+        if (values.TryGetValue("active", out var activeText))
         {
-            enabled = ParseBool(enabledText, "Camera");
-            changes[Key("Enabled")] = enabled.Value;
+            active = ParseBool(activeText, "Camera");
+            changes[Key("Active")] = active.Value;
         }
 
         // A newly chosen preset wins over the individual fields; an unchanged preset lets the fields through,
@@ -205,16 +202,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
 
         await _store.SaveAsync(changes, cancellationToken);
 
-        if (!_moduleLoaded)
-        {
-            return new SettingsApplyResult(
-                RestartRequired: true,
-                Message: enabled == true
-                    ? "Saved. Restart the service to load the camera module."
-                    : "Saved. The camera module is not loaded; changes take effect after a restart.");
-        }
-
-        return new SettingsApplyResult(Message: enabled == false
+        return new SettingsApplyResult(Message: active == false
             ? "Saved. The camera is stopping."
             : "Saved. The camera restarts with the new settings.");
     }

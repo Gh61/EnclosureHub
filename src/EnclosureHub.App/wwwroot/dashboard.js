@@ -51,7 +51,8 @@
     const s = e.state || {};
     switch (e.kind) {
       case 'sensor': return s.value == null ? '—' : `${s.value}${s.unit ? ' ' + s.unit : ''}`;
-      case 'binarySensor': return s.isOn == null ? 'Unknown' : (s.isOn ? 'On' : 'Off');
+      case 'binarySensor':
+      case 'switch': return s.isOn == null ? 'Unknown' : (s.isOn ? 'On' : 'Off');
       case 'camera': return s.hasFrame ? `Live · frame ${s.frameAgeSeconds}s ago` : 'No image';
       case 'light': return s.isOn ? `On · ${Math.round((s.brightness ?? 255) / 2.55)} %` : 'Off';
       case 'fan': return s.isOn ? `On · ${s.percentage} %` : 'Off';
@@ -62,7 +63,8 @@
   const dotClass = e => {
     const s = e.state || {};
     switch (e.kind) {
-      case 'binarySensor': return s.isOn == null ? '' : (s.isOn ? 'on' : 'off');
+      case 'binarySensor':
+      case 'switch': return s.isOn == null ? '' : (s.isOn ? 'on' : 'off');
       case 'camera': return s.hasFrame ? 'on' : 'off';
       case 'light':
       case 'fan': return s.isOn ? 'on' : 'off';
@@ -71,7 +73,10 @@
     }
   };
 
-  const kindLabel = { sensor: 'Sensor', binarySensor: 'Binary sensor', camera: 'Camera', light: 'Light', fan: 'Fan' };
+  const kindLabel = { sensor: 'Sensor', binarySensor: 'Binary sensor', switch: 'Switch', camera: 'Camera', light: 'Light', fan: 'Fan' };
+
+  const sendOnOff = (id, on) =>
+    api(`/api/entities/${encodeURIComponent(id)}/command`, { method: 'POST', body: JSON.stringify({ on }) }).catch(alertError);
 
   function renderEntities() {
     const list = $('#entities');
@@ -87,11 +92,11 @@
         el('span', { class: 'dot ' + dotClass(e) }),
         el('span', { class: 'value', text: formatState(e) }),
       ]);
-      if (e.kind === 'light' || e.kind === 'fan') {
+      if (e.kind === 'switch' || e.kind === 'light' || e.kind === 'fan') {
         const on = !!(e.state && e.state.isOn);
         control.append(el('button', {
           class: 'btn', type: 'button', text: on ? 'Turn off' : 'Turn on',
-          onclick: () => api(`/api/entities/${encodeURIComponent(e.id)}/command`, { method: 'POST', body: JSON.stringify({ on: !on }) }).catch(alertError),
+          onclick: () => sendOnOff(e.id, !on),
         }));
       }
       list.append(el('div', { class: 'row' }, [
@@ -130,12 +135,19 @@
         const placeholder = el('div', { class: 'placeholder', text: 'Waiting for the first frame…' });
         const dot = el('span', { class: 'dot' });
         const text = el('span', { text: '' });
+        // Power toggle bound to the "{id}_active" switch entity (hidden when the module has none)
+        const power = el('button', { class: 'btn toggle', type: 'button', role: 'switch', style: 'display:none' });
+        power.addEventListener('click', () => {
+          const sw = entities[camera.id + '_active'];
+          if (sw) sendOnOff(sw.id, !(sw.state && sw.state.isOn));
+        });
         const card = el('div', { class: 'camera' }, [
           el('div', { class: 'camera-view' }, [img, placeholder]),
           el('div', { class: 'camera-bar' }, [
             el('span', { class: 'name' }, [dot, camera.name]),
             text,
             el('span', { class: 'spacer' }),
+            power,
             el('a', { href: `/api/cameras/${encodeURIComponent(camera.id)}/snapshot.jpg`, target: '_blank', rel: 'noopener', text: 'Snapshot URL' }),
             el('a', { href: `/api/cameras/${encodeURIComponent(camera.id)}/stream.mjpeg`, target: '_blank', rel: 'noopener', text: 'Stream URL' }),
             el('a', { href: '#settings', text: 'Settings' }),
@@ -143,7 +155,7 @@
         ]);
         img.addEventListener('load', () => { placeholder.style.display = 'none'; });
         container.append(card);
-        view = cameraViews[camera.id] = { img, placeholder, dot, text };
+        view = cameraViews[camera.id] = { img, placeholder, dot, text, power };
       }
       updateCameraView(camera, view);
     }
@@ -151,20 +163,33 @@
 
   function updateCameraView(camera, view) {
     const running = entities[camera.id + '_running'];
+    const active = entities[camera.id + '_active'];
+    const isActive = !active || active.state.isOn !== false;
     const isRunning = running ? running.state.isOn === true : !!(camera.state && camera.state.hasFrame);
+
+    if (active) {
+      view.power.style.display = '';
+      view.power.setAttribute('aria-checked', isActive ? 'true' : 'false');
+      view.power.textContent = isActive ? 'On' : 'Off';
+      view.power.title = isActive ? 'Turn the camera off' : 'Turn the camera on';
+    }
+
     view.dot.className = 'dot ' + (isRunning ? 'on' : 'off');
-    view.text.textContent = isRunning ? 'Running' : 'Not running';
+    view.text.textContent = !isActive ? 'Turned off' : isRunning ? 'Running' : 'Starting…';
     if (!isRunning) {
-      view.placeholder.textContent = running && running.state.isOn === false ? 'Camera is off or not producing frames.' : 'Waiting for the first frame…';
+      view.placeholder.textContent = !isActive ? 'Camera is turned off.' : 'Waiting for the first frame…';
       view.placeholder.style.display = '';
     }
   }
 
-  // Only stream while the camera page is visible and the camera produces frames (saves CPU on the Pi).
+  // Only stream while the camera page is visible and the camera is on (saves CPU on the Pi).
   function updateCameraStreams() {
     for (const [id, view] of Object.entries(cameraViews)) {
       const running = entities[id + '_running'];
-      const shouldStream = currentPage === 'camera' && (!running || running.state.isOn !== false);
+      const active = entities[id + '_active'];
+      const shouldStream = currentPage === 'camera'
+        && (!active || active.state.isOn !== false)
+        && (!running || running.state.isOn !== false);
       const url = `/api/cameras/${encodeURIComponent(id)}/stream.mjpeg`;
       if (shouldStream && !view.img.getAttribute('src')) {
         view.img.src = url + '?t=' + Date.now();
@@ -357,7 +382,7 @@
       if (!entities[e.id]) entityOrder.push(e.id);
       entities[e.id] = e;
       renderEntities();
-      if (e.kind === 'camera' || e.id.endsWith('_running')) {
+      if (e.kind === 'camera' || e.id.endsWith('_running') || e.id.endsWith('_active')) {
         renderCameras();
         updateCameraStreams();
       }

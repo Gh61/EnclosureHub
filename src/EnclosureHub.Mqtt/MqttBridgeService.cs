@@ -221,23 +221,59 @@ public sealed partial class MqttBridgeService : BackgroundService
         await _client.SubscribeAsync(
             new MqttClientSubscribeOptionsBuilder()
                 .WithTopicFilter(_topics.HomeAssistantStatus)
+                .WithTopicFilter(_topics.CommandFilter)
                 .Build(),
             cancellationToken);
 
         _logger.LogInformation("Connected to MQTT broker");
     }
 
-    private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
+    private async Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
-        if (e.ApplicationMessage.Topic == _topics.HomeAssistantStatus
-            && e.ApplicationMessage.ConvertPayloadToString() == "online")
+        string topic = e.ApplicationMessage.Topic;
+
+        if (topic == _topics.HomeAssistantStatus)
         {
-            _logger.LogInformation("Home Assistant came online, republishing discovery");
-            _discoveryPending = true;
+            if (e.ApplicationMessage.ConvertPayloadToString() == "online")
+            {
+                _logger.LogInformation("Home Assistant came online, republishing discovery");
+                _discoveryPending = true;
+            }
+            return;
         }
 
-        // Command topics ({base}/{entity}/set) for lights and fans: see docs/ROADMAP.md
-        return Task.CompletedTask;
+        if (!_topics.TryParseCommand(topic, out string entityId))
+            return;
+
+        string payload = e.ApplicationMessage.ConvertPayloadToString() ?? "";
+        var entity = _registry.Find(entityId);
+
+        try
+        {
+            switch (entity)
+            {
+                case SwitchEntity sw:
+                    bool? on = HomeAssistantDiscovery.ParseOnOff(payload);
+                    if (on == null)
+                    {
+                        _logger.LogWarning("Ignoring command '{Payload}' for {Id}: expected ON or OFF", payload, entityId);
+                        return;
+                    }
+
+                    _logger.LogInformation("MQTT command: {Id} -> {State}", entityId, on.Value ? "ON" : "OFF");
+                    await sw.SetAsync(on.Value, CancellationToken.None);
+                    break;
+
+                // Lights and fans (JSON payloads): see docs/ROADMAP.md
+                default:
+                    _logger.LogWarning("Ignoring command on {Topic}: no controllable entity '{Id}'", topic, entityId);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Command for {Id} failed", entityId);
+        }
     }
 
     private async Task PublishDiscoveryAsync(CancellationToken cancellationToken)

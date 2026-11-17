@@ -33,6 +33,7 @@ Everything the controller exposes is an `Entity`:
 | `CameraEntity` | Camera | latest frame via `ICameraFrameSource` | – |
 | `SensorEntity` | Sensor | `double? Value` + unit, device/state class | – |
 | `BinarySensorEntity` | BinarySensor | `bool? IsOn` + device class | – |
+| `SwitchEntity` (abstract) | Switch | `bool? IsOn` | `SetAsync(bool)` |
 | `LightEntity` (abstract) | Light | `LightState` (on, brightness, color temp, RGB) | `SetAsync(LightCommand)` |
 | `FanEntity` (abstract) | Fan | `FanState` (on, percentage) | `SetAsync(FanCommand)` |
 
@@ -60,10 +61,10 @@ services.AddSingleton<Entity>(sp => sp.GetRequiredService<RpicamCameraService>()
 `EntityRegistry` receives `IEnumerable<Entity>` from DI. The set of entities is therefore fixed
 at startup, and adapters can enumerate it without synchronisation. Duplicate IDs fail at startup.
 
-`Program.cs` enables modules and adapters based on configuration (`Modules:{Name}:Enabled`, `Mqtt:Enabled`).
-A module's `Add…` method may be called unconditionally and check `Enabled` itself when it also
-registers a settings section – the camera does this so it can be turned back on from the dashboard
-(the entities are only registered when enabled; turning it on then requires a restart).
+`Program.cs` enables modules and adapters based on configuration (`Modules:{Name}:Enabled`, `Mqtt:Enabled`);
+a module's `Add…` method checks its own `Enabled` flag. `Enabled` means "module present" and is file-only.
+Runtime on/off states that must survive restarts and stay controllable (camera `Active`) are separate
+options, exposed as switch entities.
 
 ## Runtime settings (`EnclosureHub.Core.Settings`)
 
@@ -87,6 +88,10 @@ secrets or rarely change (MQTT, `Web:Auth`) are deliberately file-only.
 - On connect and whenever Home Assistant publishes `online` on `homeassistant/status`:
   publish discovery configs (retained), `online`, and all current states.
 - `StateChanged` → queued → state published immediately (retained).
+- Subscribed to `{base}/+/set`; `ON`/`OFF` on a switch's command topic calls `SetAsync`. The state is
+  published only when the module reports the new state (no optimistic update), so HA shows reality.
+  The camera module's `camera_active` switch persists `Modules:Camera:Active` and the service reacts via
+  its options monitor – the same path the dashboard and the HTTP command use.
 - Camera: every `CameraImageIntervalSeconds` (new frames only) either the JPEG is published
   (`CameraMode: Image`, HA component `camera`) or a snapshot URL with a cache-busting query
   (`CameraMode: Link`, HA component `image` with `url_topic`). Switching the mode republishes discovery

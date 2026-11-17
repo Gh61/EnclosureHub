@@ -106,6 +106,45 @@ public class HomeAssistantDiscoveryTests
     }
 
     [Fact]
+    public void Switch_config_has_command_topic_and_on_off_payloads()
+    {
+        var sw = new TestSwitch("camera_active", "Camera active");
+
+        Assert.Equal("switch", HomeAssistantDiscovery.GetComponent(sw, CameraPublishMode.Image));
+
+        var json = Serialize(sw);
+        Assert.Equal("enclosurehub/camera_active/state", json.GetProperty("state_topic").GetString());
+        Assert.Equal("enclosurehub/camera_active/set", json.GetProperty("command_topic").GetString());
+        Assert.Equal("ON", json.GetProperty("payload_on").GetString());
+        Assert.Equal("OFF", json.GetProperty("payload_off").GetString());
+
+        Assert.Null(HomeAssistantDiscovery.FormatState(sw));
+        sw.Set(true);
+        Assert.Equal("ON", HomeAssistantDiscovery.FormatState(sw));
+    }
+
+    [Theory]
+    [InlineData("enclosurehub/camera_active/set", true, "camera_active")]
+    [InlineData("enclosurehub/camera_active/state", false, "")]
+    [InlineData("enclosurehub/a/b/set", false, "")]
+    [InlineData("other/camera_active/set", false, "")]
+    [InlineData("enclosurehub//set", false, "")]
+    public void Command_topics_are_parsed(string topic, bool expected, string id)
+    {
+        Assert.Equal(expected, Topics.TryParseCommand(topic, out string entityId));
+        Assert.Equal(id, entityId);
+        Assert.Equal("enclosurehub/+/set", Topics.CommandFilter);
+    }
+
+    [Theory]
+    [InlineData("ON", true)]
+    [InlineData(" off ", false)]
+    [InlineData("1", true)]
+    [InlineData("banana", null)]
+    public void On_off_payloads_are_parsed(string payload, bool? expected)
+        => Assert.Equal(expected, HomeAssistantDiscovery.ParseOnOff(payload));
+
+    [Fact]
     public void Sensor_state_is_invariant_culture()
     {
         var sensor = new SensorEntity("t", "T");
@@ -118,6 +157,17 @@ public class HomeAssistantDiscoveryTests
     {
         var config = HomeAssistantDiscovery.BuildConfig(entity, Topics, Device, mode);
         return JsonDocument.Parse(JsonSerializer.Serialize(config)).RootElement;
+    }
+
+    private sealed class TestSwitch(string id, string name) : SwitchEntity(id, name)
+    {
+        public override Task SetAsync(bool on, CancellationToken cancellationToken)
+        {
+            Set(on);
+            return Task.CompletedTask;
+        }
+
+        public void Set(bool on) => UpdateState(on);
     }
 
     private sealed class NoFrames : ICameraFrameSource

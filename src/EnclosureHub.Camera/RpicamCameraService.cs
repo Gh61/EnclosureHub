@@ -27,12 +27,14 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     private CancellationTokenSource? _cycle;
     private string? _activeSignature;
 
-    public RpicamCameraService(IOptionsMonitor<RpicamCameraOptions> options, ILogger<RpicamCameraService> logger)
+    public RpicamCameraService(IOptionsMonitor<RpicamCameraOptions> options, CameraActiveSwitch activeSwitch, ILogger<RpicamCameraService> logger)
     {
         _options = options;
         _logger = logger;
+        ActiveSwitch = activeSwitch;
 
         var initial = options.CurrentValue;
+        ActiveSwitch.Reflect(initial.Active);
 
         Camera = new CameraEntity(initial.Id, initial.Name, this)
         {
@@ -51,6 +53,9 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     public CameraEntity Camera { get; }
 
     public BinarySensorEntity RunningSensor { get; }
+
+    /// <summary>"{id}_active": camera on/off, controllable from Home Assistant, the dashboard and the API.</summary>
+    public CameraActiveSwitch ActiveSwitch { get; }
 
     public CameraFrame? LatestFrame => Volatile.Read(ref _latestFrame);
 
@@ -76,12 +81,13 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
             var options = _options.CurrentValue;
             string arguments = BuildArguments(options);
             _activeSignature = Signature(options, arguments);
+            ActiveSwitch.Reflect(options.Active);
 
             try
             {
-                if (!options.Enabled)
+                if (!options.Active)
                 {
-                    _logger.LogInformation("Camera is turned off (Modules:Camera:Enabled = false)");
+                    _logger.LogInformation("Camera is turned off (Modules:Camera:Active = false)");
                     ClearFrame();
                     await Task.Delay(Timeout.Infinite, cycle.Token);
                 }
@@ -141,7 +147,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     }
 
     private static string Signature(RpicamCameraOptions options, string arguments)
-        => options.Enabled ? options.Executable + " " + arguments : "off";
+        => options.Active ? options.Executable + " " + arguments : "off";
 
     /// <summary>Builds the rpicam-vid command line for the given options.</summary>
     public static string BuildArguments(RpicamCameraOptions options)

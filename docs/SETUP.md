@@ -127,8 +127,26 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 
 ## 5. Home Assistant
 
-- *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera running, CPU temperature.
+- *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera active (switch),
+  Camera running, CPU temperature.
 - Dashboard: *Picture Entity* / *Picture Glance* card with the camera entity.
+- Camera only while printing – an automation on the PrusaLink printer state (adjust the entity ids to yours):
+
+  ```yaml
+  alias: Enclosure camera follows the printer
+  trigger:
+    - platform: state
+      entity_id: sensor.prusa_mk4s_printer_state
+  action:
+    - service: >
+        switch.turn_{{ 'on' if trigger.to_state.state in ['printing', 'paused', 'attention'] else 'off' }}
+      target:
+        entity_id: switch.printer_enclosure_camera_active
+  mode: queued
+  ```
+
+  The switch state in HA follows the real camera state (the hub reports back once the process has
+  stopped or started), so the automation is safe to re-run.
 - Fast camera modes (1080p30, 720p60, 480p90 in the hub's *Settings → Camera*): switch *Settings → Home Assistant →
   Camera in Home Assistant* to **Link**. The camera then appears as an MQTT *image* entity that Home Assistant
   fetches from the hub every few seconds, and its attributes contain `stream_url` for the MJPEG integration below.

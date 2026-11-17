@@ -10,7 +10,7 @@ namespace EnclosureHub.App.Api;
 /// Local HTTP API used by displays and other clients:
 ///   GET  /api/entities              – all entities with current state
 ///   GET  /api/entities/{id}         – one entity
-///   POST /api/entities/{id}/command – LightCommand / FanCommand as JSON
+///   POST /api/entities/{id}/command – SwitchCommand / LightCommand / FanCommand as JSON
 ///   GET  /api/events                – Server-Sent Events stream of state changes
 /// </summary>
 internal static class EntityApi
@@ -47,6 +47,13 @@ internal static class EntityApi
         {
             switch (entity)
             {
+                case SwitchEntity sw:
+                    var switchCommand = body.Deserialize<SwitchCommand>(ApiJson.Options);
+                    if (switchCommand?.On == null)
+                        return Results.BadRequest(new { error = "Expected {\"on\": true|false}." });
+                    await sw.SetAsync(switchCommand.On.Value, cancellationToken);
+                    break;
+
                 case LightEntity light:
                     var lightCommand = body.Deserialize<LightCommand>(ApiJson.Options);
                     if (lightCommand == null)

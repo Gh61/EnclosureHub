@@ -28,7 +28,8 @@ Software:
     `brightness: true`, `supported_color_modes: ["color_temp", "rgb"]`, `color_temp_kelvin: true`,
     `min_kelvin` / `max_kelvin`
   - state payload: `{"state":"ON","brightness":200,"color_mode":"color_temp","color_temp":4000}`
-  - subscribe to `{base}/+/set`, parse → `LightCommand` → `SetAsync`.
+  - the bridge already subscribes to `{base}/+/set` and handles `ON`/`OFF` for switches; add a
+    `LightEntity` case that parses the JSON payload → `LightCommand` → `SetAsync`.
 - Optional alternative driver: WLED controller over HTTP/JSON (same `LightEntity`, different implementation).
 
 ## M3 – Fans and enclosure climate

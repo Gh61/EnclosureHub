@@ -235,6 +235,7 @@ input[type="number"] { width: 110px; }
 }
 .camera-bar .name { color: var(--fg); font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .camera-bar .spacer { flex: 1; }
+.camera-bar .btn { min-width: 72px; min-height: 30px; margin-right: 8px; }
 
 .empty { color: var(--muted); padding: 24px 0; }
 

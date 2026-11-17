@@ -3,11 +3,14 @@ namespace EnclosureHub.Camera;
 /// <summary>Bound from "Modules:Camera".</summary>
 public sealed class RpicamCameraOptions
 {
-    /// <summary>
-    /// False at startup = module not loaded (no camera entities). Changed at runtime (dashboard),
-    /// it stops/starts the camera process while the entities stay registered.
-    /// </summary>
+    /// <summary>Module present. False = no camera entities at all (file-only, needs a restart).</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Camera switched on. Changed at runtime by the "{id}_active" switch (Home Assistant, dashboard, API):
+    /// false stops the capture process, the entities stay registered.
+    /// </summary>
+    public bool Active { get; set; } = true;
 
     public string Id { get; set; } = "camera";
 

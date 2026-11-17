@@ -21,8 +21,9 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
 - **Camera** – Raspberry Pi Camera Module via `rpicam-vid`: one long-lived process, latest JPEG kept in
   memory, MJPEG stream and snapshot over HTTP. Presets *Monitoring* (1640 × 1232 @ 1 fps), *1080p30*,
   *720p60*, *480p90* or a custom resolution / frame rate / quality / rotation. Can be turned off and on at runtime.
-- **Home Assistant** – MQTT discovery; the device *Printer Enclosure* with Camera, *Camera running* and
-  *CPU temperature* shows up without any YAML. Availability (last will), retained states, discovery
+- **Home Assistant** – MQTT discovery; the device *Printer Enclosure* with Camera, a **Camera active**
+  switch, *Camera running* and *CPU temperature* shows up without any YAML. The switch turns the camera on
+  and off from HA (e.g. only while the printer prints). Availability (last will), retained states, discovery
   republished when HA restarts. Camera either as an MQTT camera (JPEG pushed every few seconds) or in
   *link* mode (HA fetches snapshots itself; stream URL as an attribute) for fast camera modes.
 - **Web dashboard** – black-and-white single-page UI served by the hub: live camera, entity status via
@@ -43,8 +44,9 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for details and the intended hardware.
   `FanEntity` exists, hardware module does not.
 - **Touch display** (M4) – a dedicated display client (web kiosk, Avalonia or ESP32) using the same API.
 - **Printer awareness** (M5) – read PrusaLink locally and expose job progress.
-- Smaller gaps: MQTT command topics (`{base}/{entity}/set`) are reserved but not consumed; secrets
-  (MQTT, auth) can only be edited in the config file, not in the dashboard; HTTPS is not provided (LAN only).
+- Smaller gaps: MQTT command topics (`{base}/{entity}/set`) are consumed for switches only (lights and fans
+  will use JSON payloads); secrets (MQTT, auth) can only be edited in the config file, not in the dashboard;
+  HTTPS is not provided (LAN only).
 
 The project is a personal build tested on exactly one setup (see Hardware). Expect rough edges.
 
@@ -54,7 +56,8 @@ The project is a personal build tested on exactly one setup (see Hardware). Expe
              ┌──────────── Enclosure Hub (Raspberry Pi) ────────────┐
  Hardware    │  Modules              Entities           Adapters    │   Clients
              │                                                      │
- Camera  ───►│  Camera (rpicam) ──► camera             ┌► MQTT ─────┼─► Home Assistant
+ Camera  ───►│  Camera (rpicam) ──► camera             ┌► MQTT ◄────┼─► Home Assistant
+             │                      camera_active ◄────┤             │
              │                      camera_running ────┤             │
  /sys    ───►│  System sensors ──► cpu_temperature ────┤             │
              │                                         ├► HTTP API ──┼─► Touch display,
@@ -117,7 +120,7 @@ The fast presets are limited by the software JPEG encoder (roughly 35 fps at 720
 
 ## Web dashboard
 
-- **Camera** – live MJPEG view, running indicator, snapshot and stream links.
+- **Camera** – live MJPEG view, on/off switch, running indicator, snapshot and stream links.
 - **Status** – all entities with live values.
 - **Settings** – camera on/off, mode presets, resolution, frame rate, JPEG quality, rotation, extra rpicam
   arguments; Home Assistant camera mode, image interval and hub address; dashboard on/off. Changes are
@@ -138,7 +141,7 @@ it as a lock against accidental changes rather than strong security.
 |---|---|
 | `Device` | Id, name, manufacturer, model shown in Home Assistant |
 | `Web` | `Dashboard:Enabled`; `Auth:Username`/`Auth:Password` (Basic auth for all endpoints except `/health`) |
-| `Modules:Camera` | `Enabled`, `Width`/`Height`, `Framerate`, `Quality`, `Rotation` (0/180), `ExtraArgs` (e.g. `--hflip --vflip`) |
+| `Modules:Camera` | `Enabled` (module present), `Active` (camera on/off – the switch), `Width`/`Height`, `Framerate`, `Quality`, `Rotation` (0/180), `ExtraArgs` (e.g. `--hflip --vflip`) |
 | `Modules:SystemSensors` | `Enabled`, polling interval |
 | `Mqtt` | `Enabled`, broker `Host`/`Port`/`Username`/`Password`; `CameraMode` (`Image`/`Link`), `CameraImageIntervalSeconds`, `PublicUrl` |
 
@@ -168,7 +171,7 @@ In both modes the entity carries the attributes `stream_url`, `snapshot_url` and
 | `GET /health` | Liveness check (never requires authentication) |
 | `GET /api/entities` | All entities with current state |
 | `GET /api/entities/{id}` | One entity |
-| `POST /api/entities/{id}/command` | Control a light or fan, e.g. `{"on":true,"brightness":200}` |
+| `POST /api/entities/{id}/command` | Control a switch, light or fan, e.g. `{"on":true}` or `{"on":true,"brightness":200}` |
 | `GET /api/events` | Server-Sent Events – `state` event per entity on connect and on every change |
 | `GET /api/cameras/{id}/snapshot.jpg` | Latest camera frame |
 | `GET /api/cameras/{id}/stream.mjpeg` | MJPEG stream |
@@ -185,6 +188,7 @@ With the default `Device:Id` = `enclosurehub`:
 |---|---|
 | `enclosurehub/status` | `online` / `offline` (retained, last will) |
 | `enclosurehub/{entity}/state` | Entity state (retained) |
+| `enclosurehub/{entity}/set` | Commands from Home Assistant; switches accept `ON` / `OFF` (e.g. `enclosurehub/camera_active/set`) |
 | `enclosurehub/{entity}/image` | Camera JPEG (every `CameraImageIntervalSeconds`, new frames only; `CameraMode: Image`) |
 | `enclosurehub/{entity}/url` | Snapshot URL for Home Assistant to fetch (retained; `CameraMode: Link`) |
 | `enclosurehub/{entity}/attributes` | Camera attributes: `stream_url`, `snapshot_url`, `dashboard_url` (retained) |

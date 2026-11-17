@@ -7,7 +7,7 @@ namespace EnclosureHub.Mqtt;
 /// <summary>
 /// Maps entities to Home Assistant MQTT discovery configs and state payloads.
 /// Supported now: camera (as "camera" or "image" depending on <see cref="CameraPublishMode"/>),
-/// sensor, binary_sensor. Light and fan: see docs/ROADMAP.md.
+/// sensor, binary_sensor, switch (commands via {base}/{id}/set). Light and fan: see docs/ROADMAP.md.
 /// </summary>
 internal static class HomeAssistantDiscovery
 {
@@ -16,6 +16,7 @@ internal static class HomeAssistantDiscovery
         EntityKind.Camera => CameraComponent(cameraMode),
         EntityKind.Sensor => "sensor",
         EntityKind.BinarySensor => "binary_sensor",
+        EntityKind.Switch => "switch",
         _ => null,
     };
 
@@ -69,10 +70,25 @@ internal static class HomeAssistantDiscovery
                 config["state_topic"] = topics.State(entity.Id);
                 AddIfNotNull(config, "device_class", binarySensor.DeviceClass);
                 break;
+
+            case SwitchEntity:
+                config["state_topic"] = topics.State(entity.Id);
+                config["command_topic"] = topics.Command(entity.Id);
+                config["payload_on"] = "ON";
+                config["payload_off"] = "OFF";
+                break;
         }
 
         return config;
     }
+
+    /// <summary>Parses an ON/OFF command payload; null when it is neither.</summary>
+    public static bool? ParseOnOff(string payload) => payload.Trim().ToUpperInvariant() switch
+    {
+        "ON" or "1" or "TRUE" => true,
+        "OFF" or "0" or "FALSE" => false,
+        _ => null,
+    };
 
     /// <summary>Attributes published for a camera: where to reach the live stream and snapshot over HTTP.</summary>
     public static Dictionary<string, object?> BuildCameraAttributes(CameraEntity camera, string publicUrl) => new()
@@ -90,13 +106,16 @@ internal static class HomeAssistantDiscovery
     public static string? FormatState(Entity entity) => entity switch
     {
         SensorEntity sensor => sensor.Value?.ToString(CultureInfo.InvariantCulture),
-        BinarySensorEntity binarySensor => binarySensor.IsOn switch
-        {
-            true => "ON",
-            false => "OFF",
-            null => null,
-        },
+        BinarySensorEntity binarySensor => OnOff(binarySensor.IsOn),
+        SwitchEntity sw => OnOff(sw.IsOn),
         _ => null,
+    };
+
+    private static string? OnOff(bool? isOn) => isOn switch
+    {
+        true => "ON",
+        false => "OFF",
+        null => null,
     };
 
     private static void AddIfNotNull(Dictionary<string, object?> config, string key, string? value)
