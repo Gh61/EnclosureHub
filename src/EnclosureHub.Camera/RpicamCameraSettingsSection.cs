@@ -83,7 +83,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
             [
                 new("active", "Camera", SettingFieldType.Toggle,
                     "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause. "
-                    + "The same switch is available in Home Assistant and on the Camera page."),
+                    + "The same switch is available in Home Assistant and on the Camera page; its state shows whether frames are really coming."),
                 new("preset", "Mode", SettingFieldType.Choice,
                     "Monitoring = 1640 × 1232 at 1 fps, full sensor view, low CPU. 1080p30, 720p60 and 480p90 are for the live "
                     + "stream (a Pi 2 manages roughly 35 fps at 720p) – use the Home Assistant link mode with them. Custom: set the fields below.",

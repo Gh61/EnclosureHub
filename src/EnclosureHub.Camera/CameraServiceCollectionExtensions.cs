@@ -10,8 +10,8 @@ public static class CameraServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the Raspberry Pi camera module (rpicam-vid) from the "Modules:Camera" section unless
-    /// <c>Enabled</c> is false. Adds three entities: the camera, the "{id}_running" diagnostic binary
-    /// sensor and the "{id}_active" switch (camera on/off), plus the camera settings section.
+    /// <c>Enabled</c> is false. Adds two entities: the camera and the "{id}_active" switch (camera on/off,
+    /// state = actually running), plus the camera settings section.
     /// </summary>
     public static IServiceCollection AddRpicamCamera(this IServiceCollection services, IConfigurationSection section)
     {
@@ -26,7 +26,7 @@ public static class CameraServiceCollectionExtensions
             return new CameraActiveSwitch(options.Id + "_active", options.Name + " active",
                 sp.GetRequiredService<ISettingsStore>(), section.Path + ":Active")
             {
-                Icon = "mdi:power",
+                Icon = "mdi:cctv",
             };
         });
 
@@ -35,7 +35,6 @@ public static class CameraServiceCollectionExtensions
 
         services.AddSingleton<Entity>(sp => sp.GetRequiredService<RpicamCameraService>().Camera);
         services.AddSingleton<Entity>(sp => sp.GetRequiredService<RpicamCameraService>().ActiveSwitch);
-        services.AddSingleton<Entity>(sp => sp.GetRequiredService<RpicamCameraService>().RunningSensor);
 
         services.AddSingleton<ISettingsSection>(sp => new RpicamCameraSettingsSection(
             sp.GetRequiredService<IOptionsMonitor<RpicamCameraOptions>>(),

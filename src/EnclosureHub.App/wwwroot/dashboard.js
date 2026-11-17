@@ -161,23 +161,25 @@
     }
   }
 
+  // The "{id}_active" switch is ON only while the camera is switched on and producing frames.
   function updateCameraView(camera, view) {
-    const running = entities[camera.id + '_running'];
     const active = entities[camera.id + '_active'];
-    const isActive = !active || active.state.isOn !== false;
-    const isRunning = running ? running.state.isOn === true : !!(camera.state && camera.state.hasFrame);
+    const isOn = active ? active.state.isOn === true : !!(camera.state && camera.state.hasFrame);
 
     if (active) {
       view.power.style.display = '';
-      view.power.setAttribute('aria-checked', isActive ? 'true' : 'false');
-      view.power.textContent = isActive ? 'On' : 'Off';
-      view.power.title = isActive ? 'Turn the camera off' : 'Turn the camera on';
+      view.power.setAttribute('aria-checked', isOn ? 'true' : 'false');
+      view.power.textContent = isOn ? 'On' : 'Off';
+      view.power.title = isOn ? 'Turn the camera off' : 'Turn the camera on (restarts the capture if it is stuck)';
     }
 
-    view.dot.className = 'dot ' + (isRunning ? 'on' : 'off');
-    view.text.textContent = !isActive ? 'Turned off' : isRunning ? 'Running' : 'Starting…';
-    if (!isRunning) {
-      view.placeholder.textContent = !isActive ? 'Camera is turned off.' : 'Waiting for the first frame…';
+    view.dot.className = 'dot ' + (isOn ? 'on' : 'off');
+    view.text.textContent = isOn ? 'Running' : 'Off';
+    if (!isOn) {
+      view.placeholder.textContent = 'Camera is off or not producing frames.';
+      view.placeholder.style.display = '';
+    } else if (!(camera.state && camera.state.hasFrame)) {
+      view.placeholder.textContent = 'Waiting for the first frame…';
       view.placeholder.style.display = '';
     }
   }
@@ -185,11 +187,8 @@
   // Only stream while the camera page is visible and the camera is on (saves CPU on the Pi).
   function updateCameraStreams() {
     for (const [id, view] of Object.entries(cameraViews)) {
-      const running = entities[id + '_running'];
       const active = entities[id + '_active'];
-      const shouldStream = currentPage === 'camera'
-        && (!active || active.state.isOn !== false)
-        && (!running || running.state.isOn !== false);
+      const shouldStream = currentPage === 'camera' && (!active || active.state.isOn !== false);
       const url = `/api/cameras/${encodeURIComponent(id)}/stream.mjpeg`;
       if (shouldStream && !view.img.getAttribute('src')) {
         view.img.src = url + '?t=' + Date.now();
@@ -382,7 +381,7 @@
       if (!entities[e.id]) entityOrder.push(e.id);
       entities[e.id] = e;
       renderEntities();
-      if (e.kind === 'camera' || e.id.endsWith('_running') || e.id.endsWith('_active')) {
+      if (e.kind === 'camera' || e.id.endsWith('_active')) {
         renderCameras();
         updateCameraStreams();
       }

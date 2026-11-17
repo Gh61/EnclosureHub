@@ -127,8 +127,8 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 
 ## 5. Home Assistant
 
-- *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera active (switch),
-  Camera running, CPU temperature.
+- *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera active (switch;
+  ON = switched on and producing frames), CPU temperature, Wi-Fi signal.
 - Dashboard: *Picture Entity* / *Picture Glance* card with the camera entity.
 - Camera only while printing – an automation on the PrusaLink printer state (adjust the entity ids to yours):
 
@@ -164,6 +164,7 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 | No image | `journalctl -u enclosurehub` – lines starting with `rpicam:`; run `rpicam-hello --list-cameras` |
 | `MQTT error: … (NotAuthorized)` in the log | The broker rejects the username/password. Check the user in HA (*Settings → People → Users*) and the values in `appsettings.Local.json`; test with `mosquitto_sub -h <ha> -u … -P … -t test -C 1` |
 | Device missing in HA | `mosquitto_sub -h <ha> -u … -P … -t 'homeassistant/#' -v` |
+| Stale entity from an older version (e.g. *Camera running*) | Clear its retained discovery config: `mosquitto_pub -h <ha> -u … -P … -r -n -t homeassistant/binary_sensor/enclosurehub/camera_running/config` (and `-t enclosurehub/camera_running/state`) |
 | Entities "unavailable" | `enclosurehub/status` must be `online` |
 | Dashboard answers 404 | `Web:Dashboard:Enabled` is false in `appsettings.Local.json` – set it to true and restart |
 | Forgot the dashboard password | Edit or remove `Web:Auth` in `appsettings.Local.json` and restart |

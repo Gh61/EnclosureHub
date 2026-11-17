@@ -91,7 +91,9 @@ secrets or rarely change (MQTT, `Web:Auth`) are deliberately file-only.
 - Subscribed to `{base}/+/set`; `ON`/`OFF` on a switch's command topic calls `SetAsync`. The state is
   published only when the module reports the new state (no optimistic update), so HA shows reality.
   The camera module's `camera_active` switch persists `Modules:Camera:Active` and the service reacts via
-  its options monitor – the same path the dashboard and the HTTP command use.
+  its options monitor – the same path the dashboard and the HTTP command use. Its state is the *real*
+  state (frames arriving within `StaleAfterSeconds`, with the same grace period after a start), so one
+  entity covers both "switched on" and "running"; ON sent to an already-on but stuck camera restarts rpicam-vid.
 - Camera: every `CameraImageIntervalSeconds` (new frames only) either the JPEG is published
   (`CameraMode: Image`, HA component `camera`) or a snapshot URL with a cache-busting query
   (`CameraMode: Link`, HA component `image` with `url_topic`). Switching the mode republishes discovery

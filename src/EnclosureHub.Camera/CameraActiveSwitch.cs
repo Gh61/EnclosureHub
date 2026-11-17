@@ -4,9 +4,10 @@ using EnclosureHub.Core.Settings;
 namespace EnclosureHub.Camera;
 
 /// <summary>
-/// "{camera}_active" switch: turns the capture process on and off from Home Assistant, the dashboard
-/// or the API. Writes <c>Modules:Camera:Active</c>; <see cref="RpicamCameraService"/> reacts through
-/// its options monitor and reports the effective state back via <see cref="Reflect"/>.
+/// "{camera}_active" switch – the single on/off entity of a camera. Its state is the real state:
+/// ON while the camera is switched on and producing frames (with a short grace period after start),
+/// OFF when switched off or when no frames arrive. Turning it on persists <c>Modules:Camera:Active</c>;
+/// turning it on while it is already on but not running restarts the capture process.
 /// </summary>
 public sealed class CameraActiveSwitch : SwitchEntity
 {
@@ -20,8 +21,22 @@ public sealed class CameraActiveSwitch : SwitchEntity
         _configKey = configKey;
     }
 
-    public override Task SetAsync(bool on, CancellationToken cancellationToken)
-        => _store.SaveAsync(new Dictionary<string, object?> { [_configKey] = on }, cancellationToken);
+    /// <summary>Set by the camera service: whether the configuration currently says "on".</summary>
+    internal Func<bool>? IsConfiguredOn { get; set; }
 
-    internal void Reflect(bool active) => UpdateState(active);
+    /// <summary>Set by the camera service: restarts the capture process.</summary>
+    internal Action? RestartCapture { get; set; }
+
+    public override async Task SetAsync(bool on, CancellationToken cancellationToken)
+    {
+        bool wasConfiguredOn = IsConfiguredOn?.Invoke() ?? false;
+
+        await _store.SaveAsync(new Dictionary<string, object?> { [_configKey] = on }, cancellationToken);
+
+        // Already on but not running (ON requested again): kick the capture process
+        if (on && wasConfiguredOn && IsOn != true)
+            RestartCapture?.Invoke();
+    }
+
+    internal void Reflect(bool running) => UpdateState(running);
 }

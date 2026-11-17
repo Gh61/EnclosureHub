@@ -22,15 +22,16 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
   memory, MJPEG stream and snapshot over HTTP. Presets *Monitoring* (1640 × 1232 @ 1 fps), *1080p30*,
   *720p60*, *480p90* or a custom resolution / frame rate / quality / rotation. Can be turned off and on at runtime.
 - **Home Assistant** – MQTT discovery; the device *Printer Enclosure* with Camera, a **Camera active**
-  switch, *Camera running* and *CPU temperature* shows up without any YAML. The switch turns the camera on
-  and off from HA (e.g. only while the printer prints). Availability (last will), retained states, discovery
+  switch, *CPU temperature* and *Wi-Fi signal* shows up without any YAML. The switch turns the camera on
+  and off from HA (e.g. only while the printer prints) and its state tells whether frames are really
+  flowing – ON again while it is on but stuck restarts the capture. Availability (last will), retained states, discovery
   republished when HA restarts. Camera either as an MQTT camera (JPEG pushed every few seconds) or in
   *link* mode (HA fetches snapshots itself; stream URL as an attribute) for fast camera modes.
 - **Web dashboard** – black-and-white single-page UI served by the hub: live camera, entity status via
   Server-Sent Events, settings (applied live and saved on the device), system info and restart.
   Switchable off, optional HTTP Basic authentication.
 - **Local HTTP API + SSE** – the contract for displays and other clients; the dashboard is its reference client.
-- **Controller health** – CPU temperature and camera-running sensors.
+- **Controller health** – CPU temperature and Wi-Fi signal strength (dBm, 0 when there is no Wi-Fi link).
 - **Installation** – `deploy` script from your PC, then `sudo enclosurehub --install` creates and starts the systemd service.
 
 ## Not done yet
@@ -58,8 +59,8 @@ The project is a personal build tested on exactly one setup (see Hardware). Expe
              │                                                      │
  Camera  ───►│  Camera (rpicam) ──► camera             ┌► MQTT ◄────┼─► Home Assistant
              │                      camera_active ◄────┤             │
-             │                      camera_running ────┤             │
  /sys    ───►│  System sensors ──► cpu_temperature ────┤             │
+ /proc   ───►│                     wifi_signal ────────┤             │
              │                                         ├► HTTP API ──┼─► Touch display,
  PWM/I²C ───►│  Lights, fans (planned) ► light, fan     │  (REST+SSE) │   browser, scripts
              │                                         └► Dashboard ─┼─► Your browser
