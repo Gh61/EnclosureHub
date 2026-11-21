@@ -64,7 +64,22 @@ sudo apt install ffmpeg
 Frames and videos are stored in `/opt/enclosurehub/timelapse` (deployments do not touch it). A 48-hour
 recording at the default 30 s interval needs roughly 1.7 GB of free space before it is rendered.
 
-## 3. MQTT broker in Home Assistant
+## 3. Printer connection (optional, Prusa with Buddy firmware)
+
+Connect the printer's USB-C port (back of the electronics box, above the LAN port) to the Pi with a USB-C ↔ USB-A
+cable. With the printer switched on:
+
+```bash
+ls -l /dev/serial/by-id/      # usb-Prusa_Research__prusa3d.com__Original_Prusa_MK4S_…-if00 -> ../../ttyACM0
+groups                        # the service user must be in "dialout" (Raspberry Pi OS users are)
+```
+
+Then link it in the dashboard: *Settings → Printer → Printer connection* **On**. The printer can be switched off
+afterwards; the hub reconnects when it comes back. The `--install` unit adds `dialout` to the service groups;
+re-run `sudo /opt/enclosurehub/enclosurehub --install` once if you installed an older version and the Printer page
+reports *Permission denied*.
+
+## 4. MQTT broker in Home Assistant
 
 1. *Settings → Add-ons → Add-on store* → **Mosquitto broker** → Install → Start (enable *Start on boot*).
    Running HA in Docker without add-ons? Use the `eclipse-mosquitto` container instead.
@@ -79,7 +94,7 @@ recording at the default 30 s interval needs roughly 1.7 GB of free space before
    ```
    In HA: MQTT → Configure → *Listen to a topic* `test`.
 
-## 4. Deploy
+## 5. Deploy
 
 Set up SSH key login from your PC (needed by the deploy scripts, and handy for Claude Code):
 
@@ -135,7 +150,7 @@ journalctl -u enclosurehub -f
 Later deployments just run the deploy script again (it stops the service, copies the new build and starts it).
 To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps `/opt/enclosurehub` and its configuration).
 
-## 5. Home Assistant
+## 6. Home Assistant
 
 - *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera active (switch;
   ON = switched on and producing frames), Timelapse (switch; ON = recording, OFF = stop and render),
@@ -184,4 +199,7 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 | Camera settings don't apply | `journalctl -u enclosurehub` should show `Camera settings changed` followed by `Starting rpicam-vid …`; the service must be able to write `appsettings.Local.json` |
 | Timelapse video not rendered | Dashboard *Timelapse* page shows the error; `journalctl -u enclosurehub | grep -i timelapse`. Missing ffmpeg → *Settings → Timelapse → Install*, then the recording is rendered automatically |
 | ffmpeg *Install* fails with "password" | The service user needs passwordless sudo; run `sudo apt install ffmpeg` on the Pi instead |
+| Printer: *Printer not found* | Printer switched off, or the cable is in the wrong port; `ls /dev/serial/by-id/` must list a Prusa entry |
+| Printer: *Permission denied* on `/dev/ttyACM0` | The service user is not in `dialout`: `sudo usermod -aG dialout <user>` or re-run `--install`, then restart |
+| Timelapse ignores layers | The printer must be linked, connected and printing, and *Frame on every new layer* on; the Printer page shows the `X:… Z:…` line per layer |
 | Service won't start | `systemctl status enclosurehub`; re-run `sudo /opt/enclosurehub/enclosurehub --install` after changing users |

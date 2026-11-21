@@ -1,4 +1,5 @@
 using System.Globalization;
+using EnclosureHub.Core.Printer;
 using EnclosureHub.Core.Settings;
 using Microsoft.Extensions.Options;
 
@@ -28,21 +29,25 @@ public sealed class TimelapseSettingsSection : ISettingsSection
     private readonly IOptionsMonitor<TimelapseOptions> _options;
     private readonly ISettingsStore _store;
     private readonly string _configPath;
+    private readonly IPrinterConnection? _printer;
 
     /// <param name="configPath">Configuration path of the options, e.g. "Modules:Timelapse".</param>
-    public TimelapseSettingsSection(IOptionsMonitor<TimelapseOptions> options, ISettingsStore store, string configPath)
+    /// <param name="printer">When present and linked, the "Printer connection" fields are shown.</param>
+    public TimelapseSettingsSection(IOptionsMonitor<TimelapseOptions> options, ISettingsStore store, string configPath, IPrinterConnection? printer = null)
     {
         _options = options;
         _store = store;
         _configPath = configPath;
+        _printer = printer;
     }
 
     public string Id => "timelapse";
 
     public string Title => "Timelapse";
 
-    public string? Description => "Saves a camera frame at a fixed interval while recording and turns the frames into an MP4 video with ffmpeg "
-        + "when the recording stops. Start and stop it on the Timelapse page, from Home Assistant or via the API.";
+    public string? Description => "Saves the camera's latest frame at a fixed interval (or on every layer with a linked printer) while recording "
+        + "and turns the frames into an MP4 video with ffmpeg when the recording stops. Start and stop it on the Timelapse page, "
+        + "from Home Assistant or via the API.";
 
     public string Group => SettingsGroups.Timelapse;
 
@@ -51,7 +56,7 @@ public sealed class TimelapseSettingsSection : ISettingsSection
         get
         {
             var o = _options.CurrentValue;
-            return
+            List<SettingField> fields =
             [
                 new("interval", "Snapshot interval", SettingFieldType.Number,
                     "Seconds between two saved frames. 30 s turns a 4-hour print into 16 s of video at 30 fps.",
@@ -69,6 +74,32 @@ public sealed class TimelapseSettingsSection : ISettingsSection
                 new("turnCameraOn", "Turn the camera on", SettingFieldType.Toggle,
                     "Switches the camera on when a recording starts. Without a running camera no frames are saved."),
             ];
+
+            if (_printer is { IsLinked: true })
+            {
+                fields.AddRange(
+                [
+                    new("printerHeading", "Printer connection", SettingFieldType.Heading,
+                        "Uses the linked printer. Layer frames work while the printer is connected and printing; otherwise the snapshot interval applies, "
+                        + "so nothing needs to be changed when the printer is switched off."),
+                    new("layerFrames", "Frame on every new layer", SettingFieldType.Toggle,
+                        "Saves a frame when the printer starts a new layer instead of by the snapshot interval: the object grows evenly in the video.",
+                        Tag: SettingTags.Printer),
+                    new("timerBetweenLayers", "Also by the interval between layers", SettingFieldType.Toggle,
+                        "When a layer takes longer than the snapshot interval, a frame is saved by the timer as well (big, slow layers).",
+                        Tag: SettingTags.Printer),
+                    new("layerMinInterval", "At least the interval between frames", SettingFieldType.Toggle,
+                        "On: a layer change only saves a frame once the snapshot interval has passed since the previous frame (thin layers do not make "
+                        + "the video longer). Off: every layer change saves a frame.",
+                        Tag: SettingTags.Printer),
+                    new("followPrinter", "Start and stop with the print", SettingFieldType.Toggle,
+                        "Starts a recording when a print starts and stops it (and renders the video) when the print ends or is cancelled. "
+                        + "Leave it off if a Home Assistant automation already switches the timelapse.",
+                        Tag: SettingTags.Printer),
+                ]);
+            }
+
+            return fields;
         }
     }
 
@@ -82,6 +113,10 @@ public sealed class TimelapseSettingsSection : ISettingsSection
             ["videoFps"] = Fmt(o.VideoFps),
             ["encoder"] = o.Encoder,
             ["turnCameraOn"] = o.TurnCameraOn,
+            ["layerFrames"] = o.LayerFrames,
+            ["timerBetweenLayers"] = o.TimerFramesBetweenLayers,
+            ["layerMinInterval"] = o.LayerMinInterval,
+            ["followPrinter"] = o.FollowPrinter,
         };
     }
 
@@ -107,14 +142,20 @@ public sealed class TimelapseSettingsSection : ISettingsSection
         }
 
         if (values.TryGetValue("turnCameraOn", out var turnOnText))
-        {
-            changes[Key("TurnCameraOn")] = turnOnText?.Trim().ToLowerInvariant() switch
-            {
-                "true" or "1" or "on" => true,
-                "false" or "0" or "off" => false,
-                _ => throw new SettingsValidationException("Turn the camera on must be on or off."),
-            };
-        }
+            changes[Key("TurnCameraOn")] = ParseBool(turnOnText, "Turn the camera on");
+
+        // Printer options keep their values while the printer is unlinked; they are only sent while it is linked
+        if (values.TryGetValue("layerFrames", out var layerText))
+            changes[Key("LayerFrames")] = ParseBool(layerText, "Frame on every new layer");
+
+        if (values.TryGetValue("timerBetweenLayers", out var timerText))
+            changes[Key("TimerFramesBetweenLayers")] = ParseBool(timerText, "Also by the interval between layers");
+
+        if (values.TryGetValue("layerMinInterval", out var minText))
+            changes[Key("LayerMinInterval")] = ParseBool(minText, "At least the interval between frames");
+
+        if (values.TryGetValue("followPrinter", out var followText))
+            changes[Key("FollowPrinter")] = ParseBool(followText, "Start and stop with the print");
 
         if (changes.Count == 0)
             return new SettingsApplyResult(Message: "Nothing to save.");
@@ -124,6 +165,13 @@ public sealed class TimelapseSettingsSection : ISettingsSection
     }
 
     private string Key(string name) => _configPath + ":" + name;
+
+    private static bool ParseBool(string? text, string label) => text?.Trim().ToLowerInvariant() switch
+    {
+        "true" or "1" or "on" => true,
+        "false" or "0" or "off" => false,
+        _ => throw new SettingsValidationException($"{label} must be on or off."),
+    };
 
     private static double ParseNumber(string? text, double min, double max, string error)
     {

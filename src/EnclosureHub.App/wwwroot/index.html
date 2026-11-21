@@ -18,6 +18,7 @@
     </div>
     <a href="#camera" data-page="camera">Camera</a>
     <a href="#timelapse" data-page="timelapse">Timelapse</a>
+    <a href="#printer" data-page="printer" style="display:none">Printer</a>
     <a href="#status" data-page="status">Status</a>
     <a href="#settings" data-page="settings">Settings</a>
     <a href="#system" data-page="system">System</a>
@@ -37,6 +38,29 @@
         <h2>Videos</h2>
         <div class="note" id="timelapse-note"></div>
         <div id="timelapse-videos" class="rows"></div>
+      </div>
+    </section>
+
+    <section id="page-printer" class="page">
+      <h1>Printer</h1>
+      <div id="printer-status" class="rows"></div>
+      <div class="row">
+        <div>
+          <div class="label">Read printer information</div>
+          <div class="desc">Asks the printer who it is (M115) and for its temperatures and print state – a quick check that the USB connection works while the printer is idle.</div>
+        </div>
+        <div class="control">
+          <span class="note" id="printer-info-note"></span>
+          <button class="btn" id="printer-info-btn" type="button">Read</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="log-head">
+          <h2>Communication</h2>
+          <label class="check"><input type="checkbox" id="printer-log-temps"> Show temperature reports</label>
+        </div>
+        <p class="section-desc">Last 500 lines: <span class="dir-out">&gt;</span> sent by the hub, <span class="dir-in">&lt;</span> received from the printer, <span class="dir-info">·</span> connection notes.</p>
+        <div id="printer-log" class="log"></div>
       </div>
     </section>
 

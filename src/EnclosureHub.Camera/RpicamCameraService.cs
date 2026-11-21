@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using EnclosureHub.Core.Camera;
 using EnclosureHub.Core.Entities;
+using EnclosureHub.Core.Printer;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,12 +14,23 @@ namespace EnclosureHub.Camera;
 /// the latest frame in memory. A long-lived process keeps exposure and white balance
 /// settled (no warm-up per frame). Restarts the process when it exits or when the
 /// camera settings change; stops it while <see cref="RpicamCameraOptions.Active"/> is false.
+/// With <see cref="RpicamCameraOptions.CaptureOnLayerChange"/> and a linked printer, the first frame after every layer
+/// change is a "layer frame" consumers can wait for. Below <see cref="RpicamCameraOptions.OnDemandFramerate"/> rpicam-vid
+/// runs at that rate and only the regular frames (configured rate) and the layer frames are published (selective mode).
+/// rpicam-vid's own pause (--signal) does not help: it keeps encoding while paused (measured 70 % CPU at 5 fps on a Pi 2).
 /// </summary>
 public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 {
     private readonly IOptionsMonitor<RpicamCameraOptions> _options;
     private readonly ILogger<RpicamCameraService> _logger;
     private readonly IDisposable? _optionsChange;
+    private readonly IPrinterConnection? _printer;
+
+    // Selective mode: publish only regular frames (every _selectivePeriodTicks) and the first frame after a layer change
+    private volatile bool _selective;
+    private long _selectivePeriodTicks;
+    private long _nextPublishTicks;
+    private int _layerRequested;
 
     private CameraFrame? _latestFrame;
     private TaskCompletionSource<CameraFrame> _nextFrame = NewFrameSource();
@@ -30,10 +42,14 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     // When the current capture process was started (UTC ticks); grants a grace period before "not running"
     private long _captureStartedTicks;
 
-    public RpicamCameraService(IOptionsMonitor<RpicamCameraOptions> options, CameraActiveSwitch activeSwitch, ILogger<RpicamCameraService> logger)
+    public RpicamCameraService(IOptionsMonitor<RpicamCameraOptions> options, CameraActiveSwitch activeSwitch, ILogger<RpicamCameraService> logger,
+        IPrinterConnection? printer = null)
     {
         _options = options;
         _logger = logger;
+        _printer = printer;
+        if (_printer != null)
+            _printer.EventRaised += OnPrinterEvent;
 
         var initial = options.CurrentValue;
 
@@ -61,11 +77,27 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     public Task<CameraFrame> WaitForNextFrameAsync(CancellationToken cancellationToken)
         => Volatile.Read(ref _nextFrame).Task.WaitAsync(cancellationToken);
 
+    /// <summary>The first frame after every layer change is published (camera setting, printer linked).</summary>
+    public bool CapturesOnPrinterLayer => _options.CurrentValue.CaptureOnLayerChange && _printer is { IsLinked: true };
+
     public override void Dispose()
     {
         _optionsChange?.Dispose();
+        if (_printer != null)
+            _printer.EventRaised -= OnPrinterEvent;
         base.Dispose();
     }
+
+    private void OnPrinterEvent(object? sender, PrinterEvent e)
+    {
+        // Selective mode publishes the next frame; faster modes deliver their next frame within 1/fps anyway
+        if (e.Kind == PrinterEventKind.LayerChanged && CapturesOnPrinterLayer)
+            Interlocked.Exchange(ref _layerRequested, 1);
+    }
+
+    /// <summary>Selective mode: layer frames wanted and the configured rate below the on-demand rate.</summary>
+    private bool Selective(RpicamCameraOptions options)
+        => CapturesOnPrinterLayer && options.Framerate < options.OnDemandFramerate;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -78,8 +110,10 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 
             // Read the options after publishing the cycle so a change arriving in between still interrupts it
             var options = _options.CurrentValue;
-            string arguments = BuildArguments(options);
+            bool selective = Selective(options);
+            string arguments = BuildArguments(options, selective);
             _activeSignature = Signature(options, arguments);
+            StartSelective(options, selective);
 
             try
             {
@@ -130,7 +164,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 
     private void OnOptionsChanged(RpicamCameraOptions options)
     {
-        string signature = Signature(options, BuildArguments(options));
+        string signature = Signature(options, BuildArguments(options, Selective(options)));
         if (signature == _activeSignature)
             return; // e.g. another section was saved, or the reload fired twice – nothing relevant changed
 
@@ -156,7 +190,10 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         => options.Active ? options.Executable + " " + arguments : "off";
 
     /// <summary>Builds the rpicam-vid command line for the given options.</summary>
-    public static string BuildArguments(RpicamCameraOptions options)
+    public static string BuildArguments(RpicamCameraOptions options) => BuildArguments(options, selective: false);
+
+    /// <summary>In selective mode the sensor runs at <see cref="RpicamCameraOptions.OnDemandFramerate"/>; the service keeps the configured rate.</summary>
+    public static string BuildArguments(RpicamCameraOptions options, bool selective)
     {
         var parts = new List<string>
         {
@@ -165,7 +202,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
             "--codec mjpeg",
             "--width " + options.Width.ToString(CultureInfo.InvariantCulture),
             "--height " + options.Height.ToString(CultureInfo.InvariantCulture),
-            "--framerate " + options.Framerate.ToString(CultureInfo.InvariantCulture),
+            "--framerate " + (selective ? options.OnDemandFramerate : options.Framerate).ToString(CultureInfo.InvariantCulture),
             "-q " + options.Quality.ToString(CultureInfo.InvariantCulture),
         };
 
@@ -279,6 +316,14 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
                     continue;
                 }
 
+                // The printer link may change without a camera settings change (its options reload separately)
+                if (Selective(options) != _selective)
+                {
+                    _logger.LogInformation("Printer link or layer capture changed, restarting the camera");
+                    _selective = !_selective; // no repeat until the new cycle sets it
+                    RestartCapture();
+                }
+
                 var now = DateTime.UtcNow;
                 var frame = LatestFrame;
                 bool fresh = frame != null && (now - frame.TimestampUtc).TotalSeconds < options.StaleAfterSeconds;
@@ -305,8 +350,38 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         Camera.SetAvailable(running);
     }
 
+    private void StartSelective(RpicamCameraOptions options, bool selective)
+    {
+        Interlocked.Exchange(ref _layerRequested, 0);
+        Volatile.Write(ref _selectivePeriodTicks, TimeSpan.FromSeconds(1 / Math.Max(0.01, options.Framerate)).Ticks);
+        Volatile.Write(ref _nextPublishTicks, 0);
+        _selective = selective;
+        if (selective)
+            _logger.LogInformation("Camera runs at {Rate} fps and keeps a frame every {Period:0.#} s plus one per layer change",
+                options.OnDemandFramerate, 1 / Math.Max(0.01, options.Framerate));
+    }
+
+    /// <summary>Selective mode: true for a regular frame that is due or the first frame after a layer change.</summary>
+    internal bool ShouldPublish(long nowTicks)
+    {
+        long next = Volatile.Read(ref _nextPublishTicks);
+        if (nowTicks >= next)
+        {
+            long period = Volatile.Read(ref _selectivePeriodTicks);
+            long following = next + period;
+            Volatile.Write(ref _nextPublishTicks, following > nowTicks ? following : nowTicks + period);
+            Interlocked.Exchange(ref _layerRequested, 0); // this frame serves a pending layer request too
+            return true;
+        }
+
+        return Interlocked.Exchange(ref _layerRequested, 0) == 1;
+    }
+
     private void PublishFrame(byte[] jpeg)
     {
+        if (_selective && !ShouldPublish(DateTime.UtcNow.Ticks))
+            return;
+
         var frame = new CameraFrame(jpeg, DateTime.UtcNow);
         Volatile.Write(ref _latestFrame, frame);
 

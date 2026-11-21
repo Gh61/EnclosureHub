@@ -35,6 +35,7 @@
   <ItemGroup>
     <ProjectReference Include="..\EnclosureHub.Core\EnclosureHub.Core.csproj" />
     <ProjectReference Include="..\EnclosureHub.Camera\EnclosureHub.Camera.csproj" />
+    <ProjectReference Include="..\EnclosureHub.Printer\EnclosureHub.Printer.csproj" />
     <ProjectReference Include="..\EnclosureHub.Timelapse\EnclosureHub.Timelapse.csproj" />
     <ProjectReference Include="..\EnclosureHub.Mqtt\EnclosureHub.Mqtt.csproj" />
   </ItemGroup>

@@ -107,7 +107,7 @@ internal static class ServiceInstaller
             [Service]
             Type=notify
             User={user}
-            SupplementaryGroups=video
+            SupplementaryGroups=video dialout
             WorkingDirectory={appDir}
             ExecStart={exePath}
             Environment=DOTNET_ENVIRONMENT=Production

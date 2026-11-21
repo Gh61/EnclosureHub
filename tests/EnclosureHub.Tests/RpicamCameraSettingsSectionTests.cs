@@ -110,6 +110,30 @@ public class RpicamCameraSettingsSectionTests
     }
 
     [Fact]
+    public void Selective_mode_captures_at_the_on_demand_rate()
+    {
+        var options = new RpicamCameraOptions { Framerate = 0.2 };
+        Assert.Equal("-t 0 -n --codec mjpeg --width 1640 --height 1232 --framerate 1 -q 85 -o -", RpicamCameraService.BuildArguments(options, selective: true));
+        Assert.Contains("--framerate 0.2", RpicamCameraService.BuildArguments(options, selective: false));
+    }
+
+    [Fact]
+    public async Task Layer_capture_field_and_value()
+    {
+        var store = new FakeStore();
+        var printer = new PrinterTests.FakePrinter();
+        var section = new RpicamCameraSettingsSection(new Monitor(new RpicamCameraOptions()), store, "Modules:Camera", printer);
+        Assert.DoesNotContain(section.Fields, f => f.Key == "captureOnLayer");
+
+        printer.IsLinked = true;
+        Assert.Contains(section.Fields, f => f.Key == "captureOnLayer" && f.Tag == SettingTags.Printer);
+        Assert.Equal(false, section.GetValues()["captureOnLayer"]);
+
+        await section.ApplyAsync(new Dictionary<string, string?> { ["captureOnLayer"] = "true" }, CancellationToken.None);
+        Assert.Equal(true, store.Saved["Modules:Camera:CaptureOnLayerChange"]);
+    }
+
+    [Fact]
     public async Task Active_switch_writes_the_active_flag()
     {
         var store = new FakeStore();

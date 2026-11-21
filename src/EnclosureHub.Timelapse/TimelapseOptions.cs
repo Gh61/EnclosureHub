@@ -25,6 +25,21 @@ public sealed class TimelapseOptions
     /// <summary>Seconds between two saved frames.</summary>
     public double IntervalSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// With a linked, connected and printing printer: save a frame on every new layer instead of by the timer.
+    /// Without one (switched off, not printing) the timer is used, so this never has to be changed back.
+    /// </summary>
+    public bool LayerFrames { get; set; } = true;
+
+    /// <summary>In layer mode, also save a frame by the timer when a layer takes longer than the interval.</summary>
+    public bool TimerFramesBetweenLayers { get; set; }
+
+    /// <summary>In layer mode, skip layer changes that come sooner than the interval after the previous frame.</summary>
+    public bool LayerMinInterval { get; set; } = true;
+
+    /// <summary>Start recording when a print starts and stop (and render) when it ends. Off by default so it does not fight an existing Home Assistant automation.</summary>
+    public bool FollowPrinter { get; set; }
+
     /// <summary>A recording stops (and is rendered) automatically after this many hours.</summary>
     public double MaxDurationHours { get; set; } = 48;
 

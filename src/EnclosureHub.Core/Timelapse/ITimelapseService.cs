@@ -50,7 +50,22 @@ public sealed record TimelapseStatus(
     long? AverageFrameBytes,
     long? VideoBytesPerFrame,
     long? FreeBytes,
-    FfmpegStatus Ffmpeg);
+    FfmpegStatus Ffmpeg,
+    TimelapseTrigger Trigger,
+    int? LastLayer);
+
+/// <summary>What currently decides when a frame is saved.</summary>
+public enum TimelapseTrigger
+{
+    /// <summary>Every interval (no printer, or layer frames off, or the printer is not printing).</summary>
+    Interval,
+
+    /// <summary>On new layers reported by the printer.</summary>
+    Layers,
+
+    /// <summary>On new layers, plus by the timer when a layer takes longer than the interval.</summary>
+    LayersAndInterval,
+}
 
 public enum FfmpegInstallState
 {

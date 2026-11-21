@@ -2,6 +2,7 @@ using System.Text.Json;
 using EnclosureHub.Core;
 using EnclosureHub.Core.Camera;
 using EnclosureHub.Core.Entities;
+using EnclosureHub.Core.Printer;
 using EnclosureHub.Core.Settings;
 using EnclosureHub.Core.Timelapse;
 using EnclosureHub.Timelapse;
@@ -264,14 +265,155 @@ public sealed class TimelapseTests : IDisposable
         Assert.Empty(store.Saved);
     }
 
-    private TimelapseService CreateService(out TimelapseEntities entities, TimelapseOptions? options = null)
+    private TimelapseService CreateService(out TimelapseEntities entities, TimelapseOptions? options = null, IPrinterConnection? printer = null)
     {
         options ??= new TimelapseOptions();
         options.FfmpegExecutable = "enclosurehub-test-no-ffmpeg";
         options.MinFreeMegabytes = 0;
         entities = new TimelapseEntities(options);
         var registry = new EntityRegistry([_camera, entities.Switch, entities.Rendering]);
-        return new TimelapseService(new Monitor(options), registry, entities, _root, NullLogger<TimelapseService>.Instance);
+        return new TimelapseService(new Monitor(options), registry, entities, _root, NullLogger<TimelapseService>.Instance, printer);
+    }
+
+    // ------------------------------------------------------------------ printer connection
+
+    private static PrinterTests.FakePrinter PrintingPrinter() => new() { IsLinked = true, Connected = true, Printing = true };
+
+    private static PrinterEvent Layer(DateTime utc, int layer) => new(PrinterEventKind.LayerChanged, utc, layer, layer * 0.2);
+
+    [Fact]
+    public async Task Layers_replace_the_timer_and_keep_the_minimum_interval()
+    {
+        var service = CreateService(out _, printer: PrintingPrinter());
+        await service.StartRecordingAsync(CancellationToken.None);
+        var t0 = DateTime.UtcNow;
+        _frames.Next(t0);
+
+        await service.TickAsync(t0.AddSeconds(1), CancellationToken.None); // the timer does not save frames in layer mode
+        Assert.Equal(0, service.GetStatus().Current!.Frames);
+        Assert.Equal(TimelapseTrigger.Layers, service.GetStatus().Trigger);
+
+        await service.OnLayerAsync(Layer(t0.AddSeconds(1), 2), CancellationToken.None);
+        Assert.Equal(1, service.GetStatus().Current!.Frames);
+        Assert.Equal(2, service.GetStatus().LastLayer);
+
+        _frames.Next(t0.AddSeconds(10));
+        await service.OnLayerAsync(Layer(DateTime.UtcNow.AddSeconds(10), 3), CancellationToken.None); // 10 s < 30 s interval
+        Assert.Equal(1, service.GetStatus().Current!.Frames);
+
+        _frames.Next(t0.AddSeconds(40));
+        await service.OnLayerAsync(Layer(DateTime.UtcNow.AddSeconds(40), 4), CancellationToken.None);
+        Assert.Equal(2, service.GetStatus().Current!.Frames);
+        Assert.Equal(4, service.GetStatus().LastLayer);
+    }
+
+    [Fact]
+    public async Task Every_layer_without_the_minimum_interval()
+    {
+        var service = CreateService(out _, new TimelapseOptions { LayerMinInterval = false }, PrintingPrinter());
+        await service.StartRecordingAsync(CancellationToken.None);
+        var t0 = DateTime.UtcNow;
+
+        for (int layer = 2; layer <= 4; layer++)
+        {
+            _frames.Next(t0.AddSeconds(layer));
+            await service.OnLayerAsync(Layer(t0.AddSeconds(layer), layer), CancellationToken.None);
+        }
+
+        Assert.Equal(3, service.GetStatus().Current!.Frames);
+    }
+
+    [Fact]
+    public async Task Timer_adds_frames_during_long_layers_when_enabled()
+    {
+        var service = CreateService(out _, new TimelapseOptions { TimerFramesBetweenLayers = true }, PrintingPrinter());
+        await service.StartRecordingAsync(CancellationToken.None);
+        var t0 = DateTime.UtcNow;
+        _frames.Next(t0);
+
+        await service.OnLayerAsync(Layer(t0, 2), CancellationToken.None);
+        Assert.Equal(TimelapseTrigger.LayersAndInterval, service.GetStatus().Trigger);
+
+        _frames.Next(t0.AddSeconds(20));
+        await service.TickAsync(DateTime.UtcNow.AddSeconds(20), CancellationToken.None); // interval not reached since the layer frame
+        Assert.Equal(1, service.GetStatus().Current!.Frames);
+
+        await service.TickAsync(DateTime.UtcNow.AddSeconds(31), CancellationToken.None);
+        Assert.Equal(2, service.GetStatus().Current!.Frames);
+    }
+
+    [Fact]
+    public async Task Timer_is_used_while_the_printer_is_not_printing()
+    {
+        var printer = PrintingPrinter();
+        printer.Printing = false;
+        var service = CreateService(out _, printer: printer);
+        await service.StartRecordingAsync(CancellationToken.None);
+        var t0 = DateTime.UtcNow.AddSeconds(1);
+        _frames.Next(t0);
+
+        Assert.Equal(TimelapseTrigger.Interval, service.GetStatus().Trigger);
+        await service.TickAsync(t0, CancellationToken.None);
+        await service.OnLayerAsync(Layer(t0, 2), CancellationToken.None); // ignored: not in layer mode
+        Assert.Equal(1, service.GetStatus().Current!.Frames);
+
+        printer.IsLinked = false; // unlinked printer: the options keep their value, the timer applies
+        Assert.Equal(TimelapseTrigger.Interval, service.GetStatus().Trigger);
+    }
+
+    [Fact]
+    public async Task Recording_follows_the_print_only_when_enabled()
+    {
+        var off = CreateService(out var offEntities, printer: PrintingPrinter());
+        await off.HandlePrinterEventAsync(new PrinterEvent(PrinterEventKind.PrintStarted, DateTime.UtcNow, Detail: "a.bgcode"), CancellationToken.None);
+        Assert.False(offEntities.Switch.IsOn ?? false);
+
+        var service = CreateService(out var entities, new TimelapseOptions { FollowPrinter = true }, PrintingPrinter());
+        await service.HandlePrinterEventAsync(new PrinterEvent(PrinterEventKind.PrintStarted, DateTime.UtcNow, Detail: "a.bgcode"), CancellationToken.None);
+        Assert.True(entities.Switch.IsOn);
+
+        await service.HandlePrinterEventAsync(new PrinterEvent(PrinterEventKind.PrintFinished, DateTime.UtcNow, Detail: "done printing file"), CancellationToken.None);
+        Assert.False(entities.Switch.IsOn);
+    }
+
+    [Fact]
+    public async Task Layer_frame_waits_for_the_picture_the_camera_takes_for_the_layer()
+    {
+        var service = CreateService(out _, printer: PrintingPrinter());
+        await service.StartRecordingAsync(CancellationToken.None);
+        _frames.CapturesOnPrinterLayer = true;
+        _frames.Next(DateTime.UtcNow.AddSeconds(-5)); // old frame in memory
+
+        var layerTime = DateTime.UtcNow;
+        var handling = service.OnLayerAsync(Layer(layerTime, 2), CancellationToken.None);
+        await Task.Delay(100);
+        Assert.False(handling.IsCompleted);
+
+        _frames.Next(DateTime.UtcNow.AddMilliseconds(1)); // the camera delivers the layer picture
+        await handling;
+
+        Assert.Equal(1, service.GetStatus().Current!.Frames);
+        Assert.Equal(_frames.LatestFrame!.Jpeg, await File.ReadAllBytesAsync(
+            Path.Combine(_root, "sessions", service.GetStatus().Current!.Name, "000001.jpg")));
+    }
+
+    [Fact]
+    public void Printer_fields_appear_only_while_the_printer_is_linked()
+    {
+        var printer = new PrinterTests.FakePrinter();
+        var section = new TimelapseSettingsSection(new Monitor(new TimelapseOptions()), new FakeStore(), "Modules:Timelapse", printer);
+        Assert.DoesNotContain(section.Fields, f => f.Tag == SettingTags.Printer);
+
+        printer.IsLinked = true;
+        var keys = section.Fields.Where(f => f.Tag == SettingTags.Printer).Select(f => f.Key);
+        Assert.Equal(["layerFrames", "timerBetweenLayers", "layerMinInterval", "followPrinter"], keys);
+        Assert.Contains(section.Fields, f => f.Type == SettingFieldType.Heading);
+
+        var values = section.GetValues();
+        Assert.Equal(true, values["layerFrames"]);
+        Assert.Equal(false, values["timerBetweenLayers"]);
+        Assert.Equal(true, values["layerMinInterval"]);
+        Assert.Equal(false, values["followPrinter"]);
     }
 
     private static string? ReadState(string sessionDir)
@@ -280,13 +422,19 @@ public sealed class TimelapseTests : IDisposable
     private sealed class FakeFrameSource : ICameraFrameSource
     {
         private int _counter;
+        private TaskCompletionSource<CameraFrame> _next = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public CameraFrame? LatestFrame { get; private set; }
 
-        public void Next(DateTime timestampUtc)
-            => LatestFrame = new CameraFrame([0xFF, 0xD8, (byte)++_counter, 0xFF, 0xD9], timestampUtc);
+        public bool CapturesOnPrinterLayer { get; set; }
 
-        public Task<CameraFrame> WaitForNextFrameAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public void Next(DateTime timestampUtc)
+        {
+            LatestFrame = new CameraFrame([0xFF, 0xD8, (byte)++_counter, 0xFF, 0xD9], timestampUtc);
+            Interlocked.Exchange(ref _next, new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(LatestFrame);
+        }
+
+        public Task<CameraFrame> WaitForNextFrameAsync(CancellationToken cancellationToken) => _next.Task.WaitAsync(cancellationToken);
     }
 
     private sealed class FakeStore : ISettingsStore

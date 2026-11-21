@@ -13,6 +13,7 @@
 src/
   EnclosureHub.Core     Entity model, registry, camera abstraction, settings abstraction. No dependencies.
   EnclosureHub.Camera   Camera module: rpicam-vid → latest JPEG frame; camera settings section.
+  EnclosureHub.Printer  Printer module: Prusa (Buddy firmware) over USB serial – print/layer events, entities.
   EnclosureHub.Timelapse Timelapse module: saves a camera entity's latest frame periodically, renders with ffmpeg.
   EnclosureHub.Mqtt     MQTT adapter: Home Assistant discovery, state, images (MQTTnet 4.x).
   EnclosureHub.App      Host: configuration, DI, HTTP API, web dashboard (wwwroot), Basic auth,
@@ -79,10 +80,34 @@ Modules can expose settings for editing at runtime without the UI knowing anythi
   which fires the option monitors.
 
 `GET/PUT /api/settings` exposes all sections; the dashboard renders them generically, grouped into tabs by
-`ISettingsSection.Group` (`SettingsGroups`: Devices, Timelapse, Integrations; tabs in order of first use).
+`ISettingsSection.Group` (`SettingsGroups`: Devices, Printer, Timelapse, Integrations; tabs in order of first use).
+Besides value fields there are `Heading` (a sub-heading; the following fields belong to it) and `Info` (read-only
+text). `SettingField.Tag` marks related fields across sections: fields tagged `printer` exist only while the
+printer is linked (the sections ask `IPrinterConnection.IsLinked`), and the printer section lists them with their
+values. Saving the printer section re-renders all settings (fields appear/disappear).
 A section may get small dashboard-side extras keyed by its id (`sectionExtras` in `dashboard.js`; the
 timelapse section adds the ffmpeg status and live storage estimates). Settings that are secrets or rarely
 change (MQTT, `Web:Auth`) are deliberately file-only.
+
+## Printer connection (`EnclosureHub.Printer`)
+
+`PrusaUsbPrinter` implements `IPrinterConnection` (Core): other modules subscribe to `EventRaised`
+(`PrintStarted`, `PrintFinished`, `LayerChanged`) and read `GetStatus()`; none of them references the printer module.
+
+- Transport: the printer's USB-C port is a CDC serial device; `System.IO.Ports.SerialPort` with a 500 ms read
+  timeout on a dedicated thread (blocking reads are how an unplugged printer is noticed). Port = `Modules:Printer:Port`
+  or the first `/dev/serial/by-id/*Prusa*`. Reconnects every `ReconnectSeconds` while linked; idle while not linked.
+- Linking: the settings section calls `ReadInfoAsync` (opens the port briefly, `M115`) and saves `Linked = true`
+  plus model/firmware/UUID only if the printer answered. Afterwards the hub works without the printer.
+- `PrusaStateTracker` turns lines into state and events (see its comment for the observed protocol). Layer = Z
+  increase of ≤ 1.5 mm while printing; a decrease restarts at layer 1 (first layer after the purge position).
+  `Done printing file` ends a print (finished and cancelled, per `finalize_print` in the firmware); `Not SD printing`
+  does not (also reported while paused); losing the port does.
+- Writes only `M155 S{n}` / `M27` (when `Query`) and `M115` on request; `M155 S0` once when queries are switched off
+  or the printer is unlinked. A ring buffer keeps the last 500 lines for the Printer page.
+- Entities exist only if the printer was linked and `Entities` on at startup (the entity set is fixed).
+
+Consumers: the timelapse (layer frames, follow the print) and the camera (layer frames). Planned: light/fan rules.
 
 ## Timelapse (`EnclosureHub.Timelapse`)
 
@@ -101,6 +126,12 @@ It never talks to rpicam itself, so the camera runs unchanged.
   frames (retry/discard via the API); the default hardware encoder (`h264_v4l2m2m`) falls back to libx264.
 - ffmpeg is required; `Ffmpeg` detects it (re-checks every 10 s while missing) and can install it with
   `sudo -n apt-get install ffmpeg` on request, then re-queues failed renders.
+- With a linked printer (`IPrinterConnection`, optional): the trigger is `Layers` while it is connected and printing
+  and `LayerFrames` is on (timer frames only with `TimerFramesBetweenLayers`; `LayerMinInterval` skips layers sooner
+  than the interval), `Interval` otherwise. Layer events are queued and handled one at a time; a frame is saved only
+  if newer than the last saved one (timer and layer can race). `FollowPrinter` starts/stops the recording.
+  If the camera reports `CapturesOnPrinterLayer`, the timelapse waits (≤ 5 s) for the first frame after the layer
+  change (`WaitForFrameAfterAsync`) instead of taking `LatestFrame`.
 - Adapters see it only through `ITimelapseService` (Core): `TimelapseApi` maps `/api/timelapse/*` when it is
   registered. Names are validated (`[A-Za-z0-9][A-Za-z0-9_-]*`) before touching files.
 
@@ -162,6 +193,9 @@ stream is attached only while the Camera page is visible to spare the Pi.
 ## Resource notes for Raspberry Pi 2
 
 - Workstation GC, no concurrent GC, invariant globalization (see `EnclosureHub.App.csproj`).
-- Camera runs one long-lived `rpicam-vid` at 1 fps, software MJPEG – negligible CPU.
+- Camera runs one long-lived `rpicam-vid` at 1 fps, software MJPEG – about 15 % CPU; cost grows linearly with fps.
+- Layer frames below 1 fps: rpicam-vid runs at `OnDemandFramerate` (1) and the service publishes only the regular
+  and the layer frames ("selective mode"). rpicam-vid `--signal` pause was measured first and rejected: it keeps
+  encoding while paused (70 % CPU at 5 fps).
 - Timelapse capture is a file write every interval; rendering is CPU-heavy but runs at idle priority.
 - Publish self-contained with ReadyToRun to cut startup time; never build on the Pi.

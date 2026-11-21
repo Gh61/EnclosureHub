@@ -1,5 +1,6 @@
 using EnclosureHub.Core;
 using EnclosureHub.Core.Entities;
+using EnclosureHub.Core.Printer;
 using EnclosureHub.Core.Settings;
 using EnclosureHub.Core.Timelapse;
 using Microsoft.Extensions.Configuration;
@@ -35,7 +36,8 @@ public static class TimelapseServiceCollectionExtensions
                 sp.GetRequiredService<IEntityRegistry>(),
                 sp.GetRequiredService<TimelapseEntities>(),
                 root,
-                sp.GetRequiredService<ILogger<TimelapseService>>());
+                sp.GetRequiredService<ILogger<TimelapseService>>(),
+                sp.GetService<IPrinterConnection>()); // optional: layer frames and following the print
         });
         services.AddHostedService(sp => sp.GetRequiredService<TimelapseService>());
         services.AddSingleton<ITimelapseService>(sp => sp.GetRequiredService<TimelapseService>());
@@ -46,7 +48,8 @@ public static class TimelapseServiceCollectionExtensions
         services.AddSingleton<ISettingsSection>(sp => new TimelapseSettingsSection(
             sp.GetRequiredService<IOptionsMonitor<TimelapseOptions>>(),
             sp.GetRequiredService<ISettingsStore>(),
-            section.Path));
+            section.Path,
+            sp.GetService<IPrinterConnection>()));
 
         return services;
     }

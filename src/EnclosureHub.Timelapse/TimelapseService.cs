@@ -3,7 +3,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using EnclosureHub.Core;
+using EnclosureHub.Core.Camera;
 using EnclosureHub.Core.Entities;
+using EnclosureHub.Core.Printer;
 using EnclosureHub.Core.Timelapse;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,6 +18,8 @@ namespace EnclosureHub.Timelapse;
 /// <see cref="TimelapseOptions.IntervalSeconds"/> into a session directory; stopping queues the session
 /// for rendering with ffmpeg (one at a time, idle priority) into <c>videos/{name}.mp4</c> plus a thumbnail.
 /// Everything lives on disk, so a restart resumes the recording and re-renders queued sessions.
+/// With a linked printer (<see cref="IPrinterConnection"/>) frames can follow the layers instead of the timer, and
+/// recording can follow the print (<see cref="TimelapseOptions.LayerFrames"/>, <see cref="TimelapseOptions.FollowPrinter"/>).
 /// <code>
 /// {Directory}/sessions/{name}/session.json, 000001.jpg, 000002.jpg, …
 /// {Directory}/videos/{name}.mp4, {name}.jpg (thumbnail), {name}.json (frames, fps, start, stop)
@@ -39,6 +43,8 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
     private readonly TimelapseEntities _entities;
     private readonly ILogger<TimelapseService> _logger;
     private readonly Ffmpeg _ffmpeg;
+    private readonly IPrinterConnection? _printer;
+    private readonly Channel<PrinterEvent> _printerEvents = Channel.CreateUnbounded<PrinterEvent>();
     private readonly string _rootDir;
     private readonly string _sessionsDir;
     private readonly string _videosDir;
@@ -58,9 +64,11 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         IEntityRegistry registry,
         TimelapseEntities entities,
         string rootDirectory,
-        ILogger<TimelapseService> logger)
+        ILogger<TimelapseService> logger,
+        IPrinterConnection? printer = null)
     {
         _options = options;
+        _printer = printer;
         _registry = registry;
         _entities = entities;
         _logger = logger;
@@ -95,6 +103,7 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         }
 
         var renderer = RenderLoopAsync(stoppingToken);
+        var printerLoop = PrinterLoopAsync(stoppingToken);
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         try
@@ -117,6 +126,7 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         }
 
         await renderer;
+        await printerLoop;
     }
 
     // ------------------------------------------------------------------ recording
@@ -202,7 +212,11 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         }
     }
 
-    /// <summary>One step of the capture loop (every second): limits, then a frame when the interval is due.</summary>
+    /// <summary>
+    /// One step of the capture loop (every second): limits, then a frame when the timer is due. While frames follow
+    /// the printer's layers, the timer only adds frames if <see cref="TimelapseOptions.TimerFramesBetweenLayers"/> is on
+    /// and the interval has passed since the last frame.
+    /// </summary>
     internal async Task TickAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
         var options = _options.CurrentValue;
@@ -219,13 +233,82 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
             return;
         }
 
-        if (nowUtc < recording.NextCaptureUtc)
-            return;
+        switch (CurrentTrigger(options))
+        {
+            case TimelapseTrigger.Layers:
+                return;
+
+            case TimelapseTrigger.LayersAndInterval:
+                if (recording.LastFrameUtc is { } last && nowUtc - last < Interval(options))
+                    return;
+                break;
+
+            default:
+                if (nowUtc < recording.NextCaptureUtc)
+                    return;
+                break;
+        }
 
         // Only new frames from a working camera; otherwise try again on the next tick
         var camera = _registry.Find(options.CameraId) as CameraEntity;
-        var frame = camera?.Source.LatestFrame;
-        if (camera == null || !camera.IsAvailable || frame == null || frame.TimestampUtc <= recording.LastSourceFrameUtc)
+        if (camera == null || !camera.IsAvailable || camera.Source.LatestFrame is not { } frame)
+            return;
+
+        await SaveFrameAsync(recording, frame, nowUtc, null, options, cancellationToken);
+    }
+
+    /// <summary>
+    /// A new layer: save a frame unless it comes sooner than the interval after the previous one
+    /// (<see cref="TimelapseOptions.LayerMinInterval"/>). If the camera captures a fresh picture on layer changes,
+    /// wait for that one; otherwise take the latest frame in memory.
+    /// </summary>
+    internal async Task OnLayerAsync(PrinterEvent layer, CancellationToken cancellationToken)
+    {
+        var options = _options.CurrentValue;
+        Recording? recording;
+        lock (_gate)
+            recording = _current;
+
+        if (recording == null || CurrentTrigger(options) == TimelapseTrigger.Interval)
+            return;
+
+        if (options.LayerMinInterval && recording.LastFrameUtc is { } last && layer.Utc - last < Interval(options))
+        {
+            _logger.LogDebug("Layer {Layer}: less than the interval since the last frame, skipped", layer.Layer);
+            return;
+        }
+
+        var camera = _registry.Find(options.CameraId) as CameraEntity;
+        if (camera == null || !camera.IsAvailable)
+            return;
+
+        var frame = camera.Source.CapturesOnPrinterLayer
+            ? await camera.Source.WaitForFrameAfterAsync(layer.Utc, TimeSpan.FromSeconds(5), cancellationToken) ?? camera.Source.LatestFrame
+            : camera.Source.LatestFrame;
+
+        if (frame != null)
+            await SaveFrameAsync(recording, frame, DateTime.UtcNow, layer.Layer, options, cancellationToken);
+    }
+
+    /// <summary>Layers decide while the printer is linked, connected and printing and layer frames are on; otherwise the timer.</summary>
+    private TimelapseTrigger CurrentTrigger(TimelapseOptions options)
+    {
+        if (!options.LayerFrames || _printer is not { IsLinked: true })
+            return TimelapseTrigger.Interval;
+
+        var status = _printer.GetStatus();
+        if (!status.Connected || !status.Printing)
+            return TimelapseTrigger.Interval;
+
+        return options.TimerFramesBetweenLayers ? TimelapseTrigger.LayersAndInterval : TimelapseTrigger.Layers;
+    }
+
+    private static TimeSpan Interval(TimelapseOptions options) => TimeSpan.FromSeconds(Math.Max(1, options.IntervalSeconds));
+
+    /// <summary>Writes the frame unless it was saved already; checks the disk space first.</summary>
+    private async Task SaveFrameAsync(Recording recording, CameraFrame frame, DateTime nowUtc, int? layer, TimelapseOptions options, CancellationToken cancellationToken)
+    {
+        if (frame.TimestampUtc <= recording.LastSourceFrameUtc)
             return;
 
         // Keep room for this frame and for the video the recording turns into (frames and video coexist while rendering)
@@ -244,18 +327,21 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         await _ops.WaitAsync(cancellationToken);
         try
         {
-            if (!ReferenceEquals(_current, recording))
-                return; // stopped in the meantime
+            // Stopped in the meantime, or the timer and a layer change raced for the same frame
+            if (!ReferenceEquals(_current, recording) || frame.TimestampUtc <= recording.LastSourceFrameUtc)
+                return;
 
             await File.WriteAllBytesAsync(FramePath(recording.Dir, recording.Frames + 1), frame.Jpeg, cancellationToken);
 
-            var interval = TimeSpan.FromSeconds(Math.Max(1, options.IntervalSeconds));
+            var interval = Interval(options);
             lock (_gate)
             {
                 recording.Frames++;
                 recording.Bytes += frame.Jpeg.Length;
                 recording.LastFrameUtc = nowUtc;
                 recording.LastSourceFrameUtc = frame.TimestampUtc;
+                if (layer != null)
+                    recording.LastLayer = layer;
 
                 // Keep the cadence; after a gap (camera off) continue from now
                 var next = recording.NextCaptureUtc + interval;
@@ -265,6 +351,61 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         finally
         {
             _ops.Release();
+        }
+    }
+
+    // ------------------------------------------------------------------ printer
+
+    private void OnPrinterEvent(object? sender, PrinterEvent e) => _printerEvents.Writer.TryWrite(e);
+
+    /// <summary>Handles printer events one after another: follow the print (start/stop) and layer frames.</summary>
+    private async Task PrinterLoopAsync(CancellationToken stoppingToken)
+    {
+        if (_printer == null)
+            return;
+
+        _printer.EventRaised += OnPrinterEvent;
+        try
+        {
+            await foreach (var e in _printerEvents.Reader.ReadAllAsync(stoppingToken))
+            {
+                try
+                {
+                    await HandlePrinterEventAsync(e, stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Timelapse could not handle the printer event {Kind}", e.Kind);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // shutting down
+        }
+        finally
+        {
+            _printer.EventRaised -= OnPrinterEvent;
+        }
+    }
+
+    internal async Task HandlePrinterEventAsync(PrinterEvent e, CancellationToken cancellationToken)
+    {
+        var options = _options.CurrentValue;
+        switch (e.Kind)
+        {
+            case PrinterEventKind.PrintStarted when options.FollowPrinter:
+                _logger.LogInformation("Print started ({File}), starting the timelapse", e.Detail ?? "?");
+                await StartRecordingAsync(cancellationToken);
+                break;
+
+            case PrinterEventKind.PrintFinished when options.FollowPrinter:
+                await StopRecordingAsync("print ended: " + e.Detail, cancellationToken);
+                break;
+
+            case PrinterEventKind.LayerChanged:
+                await OnLayerAsync(e, cancellationToken);
+                break;
         }
     }
 
@@ -531,6 +672,7 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         var camera = _registry.Find(options.CameraId) as CameraEntity;
         long? free = FreeBytes();
         var ffmpeg = _ffmpeg.GetStatus();
+        var trigger = CurrentTrigger(options);
 
         lock (_gate)
         {
@@ -552,7 +694,9 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
                 average,
                 _videoBytesPerFrame,
                 free,
-                ffmpeg);
+                ffmpeg,
+                trigger,
+                _current?.LastLayer);
         }
     }
 
@@ -784,6 +928,7 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
         public DateTime? LastFrameUtc { get; set; }
         public DateTime LastSourceFrameUtc { get; set; }
         public DateTime NextCaptureUtc { get; set; }
+        public int? LastLayer { get; set; }
     }
 
     private sealed class Pending(string name, string dir, DateTime startedUtc, DateTime stoppedUtc)

@@ -13,11 +13,18 @@ public enum SettingFieldType
 
     /// <summary>One of <see cref="SettingField.Choices"/>.</summary>
     Choice,
+
+    /// <summary>Sub-heading inside a section (label + description, no value); the fields below belong to it.</summary>
+    Heading,
+
+    /// <summary>Read-only text from the values (e.g. what the printer reported); never sent back.</summary>
+    Info,
 }
 
 public sealed record SettingChoice(string Value, string Label);
 
 /// <summary>Describes one editable setting of a <see cref="ISettingsSection"/>; the dashboard renders it generically.</summary>
+/// <param name="Tag">Groups related fields across sections, e.g. "printer" for everything the printer connection enables.</param>
 public sealed record SettingField(
     string Key,
     string Label,
@@ -26,4 +33,12 @@ public sealed record SettingField(
     IReadOnlyList<SettingChoice>? Choices = null,
     double? Min = null,
     double? Max = null,
-    double? Step = null);
+    double? Step = null,
+    string? Tag = null);
+
+/// <summary>Well-known <see cref="SettingField.Tag"/> values.</summary>
+public static class SettingTags
+{
+    /// <summary>Fields that only exist while the printer is linked; the printer section lists them with their states.</summary>
+    public const string Printer = "printer";
+}

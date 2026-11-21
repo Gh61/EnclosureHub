@@ -5,7 +5,7 @@ Guidance for Claude Code working in this repository.
 ## Project
 
 Enclosure Hub – modular .NET 10 controller for 3D printer enclosure accessories on a Raspberry Pi
-(camera, sensors; lights, fans and a display are planned). Integrates with Home Assistant via MQTT
+(camera, timelapse, Prusa printer connection over USB, sensors; lights, fans and a display are planned). Integrates with Home Assistant via MQTT
 discovery and exposes a local HTTP API + SSE for displays. Read `docs/ARCHITECTURE.md` first,
 `docs/ROADMAP.md` for planned work.
 
@@ -43,4 +43,9 @@ logs: `journalctl -u enclosurehub`. Config on the device: `/opt/enclosurehub/app
 - Mind the Pi 2: avoid allocations in hot loops, no polling faster than needed, no heavy dependencies.
 - Stay on MQTTnet 4.x unless deliberately migrating everything to 5.x (API differs).
 - Never commit secrets; device-specific settings go to `appsettings.Local.json` (gitignored, not published).
+- Every new module or user-visible feature is documented in `README.md` (what it does, dashboard, settings/config
+  keys, API endpoints, MQTT entities) in the same change – plus `docs/ARCHITECTURE.md` for design and
+  `docs/SETUP.md` for installation steps where relevant.
+- A new feature of one module must not change the behaviour of others by default (e.g. linking the printer does
+  not start recording timelapses); new couplings are opt-in settings.
 - When editing existing code, change only what the task requires – keep formatting and names.

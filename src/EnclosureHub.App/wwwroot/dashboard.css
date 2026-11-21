@@ -259,6 +259,17 @@ input[type="number"] { width: 110px; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
+/* Sub-heading inside a settings section (spans both columns of the grid) */
+.subheading {
+  grid-column: 1 / -1;
+  padding: 26px 0 6px;
+  border-bottom: 1px solid var(--line);
+}
+.subheading h3 { font-size: 15px; font-weight: 500; margin: 0; letter-spacing: .02em; }
+.subheading .desc { max-width: none; }
+.related { margin-top: 8px; }
+.value.info { white-space: normal; text-align: right; }
+
 .estimate { color: var(--fg); font-size: 13px; margin-top: 8px; max-width: 420px; }
 .estimate.err, .sub.err { color: var(--warn); }
 
@@ -281,6 +292,30 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .video .control { flex-wrap: wrap; align-self: center; }
 .video .control .btn { min-width: 0; }
 #timelapse-note:empty { display: none; }
+
+/* ---- Printer ---- */
+
+.log-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.check { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.check input { accent-color: var(--fg); }
+
+.log {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #050505;
+  height: 420px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.log-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-all; }
+.log-time { color: var(--muted); flex: none; }
+.log-dir { flex: none; width: 1ch; }
+.dir-in .log-dir, .dir-in { color: #d6d6d6; }
+.dir-out .log-dir, .dir-out { color: var(--fg); font-weight: 600; }
+.dir-info, .dir-info .log-dir { color: var(--muted); font-style: italic; }
 #timelapse-note { margin: 8px 0; }
 
 /* ---- Narrow screens: navigation on top ---- */

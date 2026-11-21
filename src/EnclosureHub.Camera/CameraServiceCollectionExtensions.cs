@@ -1,4 +1,5 @@
 using EnclosureHub.Core.Entities;
+using EnclosureHub.Core.Printer;
 using EnclosureHub.Core.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,7 +40,8 @@ public static class CameraServiceCollectionExtensions
         services.AddSingleton<ISettingsSection>(sp => new RpicamCameraSettingsSection(
             sp.GetRequiredService<IOptionsMonitor<RpicamCameraOptions>>(),
             sp.GetRequiredService<ISettingsStore>(),
-            section.Path));
+            section.Path,
+            sp.GetService<IPrinterConnection>()));
 
         return services;
     }

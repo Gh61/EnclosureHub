@@ -92,10 +92,21 @@ displays are clients. Possible clients, not mutually exclusive:
 Suggested first step: a small static web UI (vanilla JS) in `EnclosureHub.App/wwwroot` using SSE –
 it doubles as the reference client for the other options.
 
-## M5 – Printer awareness (optional)
+## M5 – Printer awareness ✅ (USB)
 
-- Read PrusaLink locally (`/api/v1/status`) to show job progress on the display without Home Assistant.
-- Expose as sensors (state, progress %, time remaining).
+Done: `EnclosureHub.Printer` – Prusa (Buddy firmware) over the USB-C serial port: print start/end (incl. cancel),
+layer changes, temperatures, Z; Printer page with the communication log; optional entities; timelapse per layer
+and following the print; camera layer frames. Tested on an MK4S (firmware 6.5.7 and 8.0.2).
+
+Next:
+- **Automations in the hub** (with M2/M3): light on while printing, fan by filament/temperature, venting
+  (open/close the enclosure) after certain filaments – as opt-in rules reacting to `IPrinterConnection` events.
+- **Custom G-code layer marker** as a second *Layer change detection* option (e.g. a parked-head snapshot:
+  park, `M400`, marker, dwell). Note: `M118` from a printed file did *not* reach the USB port in our test; a
+  marker would need another command that the firmware echoes, or the GPIO Hackerboard (`M262`/`M264`) wired to a
+  Pi GPIO input.
+- Job name / remaining time: PrusaLink (`/api/v1/status`) or `M27 C`; the USB `File opened` only has the 8.3 name.
+- Other Buddy printers (MK4, MK3.9/3.5, MINI, XL, CORE One): same protocol, untested.
 
 ## Ideas
 

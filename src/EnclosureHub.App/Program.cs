@@ -6,6 +6,7 @@ using EnclosureHub.Camera;
 using EnclosureHub.Core;
 using EnclosureHub.Core.Settings;
 using EnclosureHub.Mqtt;
+using EnclosureHub.Printer;
 using EnclosureHub.Timelapse;
 
 // `sudo enclosurehub --install` / `--uninstall` manage the systemd service and exit
@@ -30,6 +31,7 @@ builder.Services.AddSingleton<ISettingsStore>(new LocalSettingsStore(localSettin
 
 // ---- Modules (each one registers its entities and settings; honours Modules:{Name}:Enabled) ----
 builder.Services.AddRpicamCamera(config.GetSection("Modules:Camera"));
+builder.Services.AddPrusaPrinter(config.GetSection("Modules:Printer"));
 builder.Services.AddTimelapse(config.GetSection("Modules:Timelapse"));
 
 if (config.GetValue("Modules:SystemSensors:Enabled", true))
@@ -57,6 +59,7 @@ app.MapGet("/health", (IEntityRegistry registry) => Results.Json(new { status = 
 app.MapEntityApi();
 app.MapCameraApi();
 app.MapTimelapseApi();
+app.MapPrinterApi();
 app.MapSettingsApi();
 app.MapSystemApi();
 

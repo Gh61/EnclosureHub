@@ -1,4 +1,5 @@
 using System.Globalization;
+using EnclosureHub.Core.Printer;
 using EnclosureHub.Core.Settings;
 using Microsoft.Extensions.Options;
 
@@ -56,16 +57,20 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
     private readonly IOptionsMonitor<RpicamCameraOptions> _options;
     private readonly ISettingsStore _store;
     private readonly string _configPath;
+    private readonly IPrinterConnection? _printer;
 
     /// <param name="configPath">Configuration path of the options, e.g. "Modules:Camera".</param>
+    /// <param name="printer">When present and linked, the "Printer connection" field is shown.</param>
     public RpicamCameraSettingsSection(
         IOptionsMonitor<RpicamCameraOptions> options,
         ISettingsStore store,
-        string configPath)
+        string configPath,
+        IPrinterConnection? printer = null)
     {
         _options = options;
         _store = store;
         _configPath = configPath;
+        _printer = printer;
     }
 
     public string Id => "camera";
@@ -79,7 +84,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
         get
         {
             var o = _options.CurrentValue;
-            return
+            List<SettingField> fields =
             [
                 new("active", "Camera", SettingFieldType.Toggle,
                     "Turning the camera off stops the capture process; the stream, snapshots and the Home Assistant image pause. "
@@ -102,6 +107,19 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
                 new("extraArgs", "Extra arguments", SettingFieldType.Text,
                     "Additional rpicam-vid options, e.g. --hflip --vflip or --awb tungsten."),
             ];
+
+            if (_printer is { IsLinked: true })
+            {
+                fields.Add(new("printerHeading", "Printer connection", SettingFieldType.Heading,
+                    "Uses the linked printer; works while it is connected and printing."));
+                fields.Add(new("captureOnLayer", "New frame on every layer change", SettingFieldType.Toggle,
+                    "Provides a fresh picture right after the printer starts a new layer, besides the regular frame rate; the timelapse then "
+                    + "waits for exactly this picture. At 1 fps and faster it is simply the next frame (within a second). Below 1 fps the camera "
+                    + "captures at 1 fps (CPU like the Monitoring preset) and keeps only the regular frames and one per layer.",
+                    Tag: SettingTags.Printer));
+            }
+
+            return fields;
         }
     }
 
@@ -117,6 +135,7 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
             ["quality"] = (double)o.Quality,
             ["rotation"] = Fmt(o.Rotation),
             ["extraArgs"] = o.ExtraArgs,
+            ["captureOnLayer"] = o.CaptureOnLayerChange,
         };
     }
 
@@ -196,6 +215,9 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
 
             changes[Key("ExtraArgs")] = extraArgs;
         }
+
+        if (values.TryGetValue("captureOnLayer", out var captureText))
+            changes[Key("CaptureOnLayerChange")] = ParseBool(captureText, "New frame on every layer change");
 
         if (changes.Count == 0)
             return new SettingsApplyResult(Message: "Nothing to save.");
