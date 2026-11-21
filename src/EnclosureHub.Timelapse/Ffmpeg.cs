@@ -62,9 +62,10 @@ internal sealed class Ffmpeg
 
         lock (_gate)
         {
+            bool firstCheck = _lastDetectUtc == default;
             _lastDetectUtc = DateTime.UtcNow;
-            if (path == _path && _version != null)
-                return;
+            if (path == _path && (_version != null || (path == null && !firstCheck)))
+                return; // unchanged – log only when the state changes
         }
 
         if (path != null)
