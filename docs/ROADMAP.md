@@ -9,12 +9,11 @@ systemd service. Verified on a Raspberry Pi 2 with Camera Module 2 (about 70 MB 
 
 Module `EnclosureHub.Timelapse`: a frame every N seconds from the camera's latest image, MP4 rendered with
 ffmpeg after stopping, library on the dashboard (play, download, delete), `timelapse` switch +
-`timelapse_rendering` sensor in Home Assistant, ffmpeg installable from the dashboard.
+`timelapse_rendering` sensor in Home Assistant, ffmpeg installable from the dashboard. Measured on the Pi 2 with
+60 frames at 1640 × 1232: hardware encoder (`h264_v4l2m2m`, default) 6.8 s, libx264 *veryfast* 71 s, same size.
 
 Still open:
 
-- **Verify the hardware encoder on the Pi 2** (`h264_v4l2m2m`; the software path falls back automatically) and
-  measure libx264 render times for a 48 h recording; pick the default accordingly.
 - **Retention** – keep the last N videos / delete videos older than X days (settings), so the SD card never
   fills up unattended.
 - **Video management over MQTT** – proposal below, not implemented.

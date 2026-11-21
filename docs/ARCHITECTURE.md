@@ -98,7 +98,7 @@ It never talks to rpicam itself, so the camera runs unchanged.
   re-renders queued sessions. Limits: `MaxDurationHours`, `MinFreeMegabytes`.
 - Rendering: one ffmpeg at a time, idle priority (`nice 19`), `-progress pipe:1` for the percentage; output to
   `videos/{name}.mp4` (+ `.jpg` thumbnail, `.json` metadata), then the frames are deleted. Failures keep the
-  frames (retry/discard via the API); the hardware encoder falls back to libx264.
+  frames (retry/discard via the API); the default hardware encoder (`h264_v4l2m2m`) falls back to libx264.
 - ffmpeg is required; `Ffmpeg` detects it (re-checks every 10 s while missing) and can install it with
   `sudo -n apt-get install ffmpeg` on request, then re-queues failed renders.
 - Adapters see it only through `ITimelapseService` (Core): `TimelapseApi` maps `/api/timelapse/*` when it is

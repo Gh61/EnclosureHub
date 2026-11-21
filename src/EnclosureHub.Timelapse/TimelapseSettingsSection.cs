@@ -21,8 +21,8 @@ public sealed class TimelapseSettingsSection : ISettingsSection
 
     private static readonly SettingChoice[] Encoders =
     [
-        new(TimelapseOptions.SoftwareEncoder, "Software (libx264)"),
         new(TimelapseOptions.HardwareEncoder, "Raspberry Pi hardware encoder"),
+        new(TimelapseOptions.SoftwareEncoder, "Software (libx264)"),
     ];
 
     private readonly IOptionsMonitor<TimelapseOptions> _options;
@@ -63,8 +63,8 @@ public sealed class TimelapseSettingsSection : ISettingsSection
                     "Frames per second of the rendered video: higher means a shorter, faster video.",
                     WithCurrent(Fps, Fmt(o.VideoFps))),
                 new("encoder", "Video encoder", SettingFieldType.Choice,
-                    "Software gives the best quality per megabyte but is slow on a Pi 2 (it runs at idle priority, so nothing else suffers). "
-                    + "The hardware encoder is much faster; if it fails, the software encoder is used.",
+                    "The hardware encoder renders about 10× faster on a Pi 2 (a 4-hour print in about a minute) at the same file size; "
+                    + "if it fails, the software encoder is used. Software (libx264) is slow on a Pi 2 but works on any device.",
                     Encoders),
                 new("turnCameraOn", "Turn the camera on", SettingFieldType.Toggle,
                     "Switches the camera on when a recording starts. Without a running camera no frames are saved."),

@@ -31,8 +31,11 @@ public sealed class TimelapseOptions
     /// <summary>Frame rate of the rendered video.</summary>
     public int VideoFps { get; set; } = 30;
 
-    /// <summary><see cref="SoftwareEncoder"/> or <see cref="HardwareEncoder"/> (falls back to software when it fails).</summary>
-    public string Encoder { get; set; } = SoftwareEncoder;
+    /// <summary>
+    /// <see cref="HardwareEncoder"/> (default; about 10× faster than libx264 on a Pi 2 at the same file size) or
+    /// <see cref="SoftwareEncoder"/>. The hardware encoder falls back to software when it fails (e.g. no VideoCore).
+    /// </summary>
+    public string Encoder { get; set; } = HardwareEncoder;
 
     /// <summary>libx264 quality, 0–51; lower is better and larger.</summary>
     public int Crf { get; set; } = 23;
