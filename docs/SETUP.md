@@ -54,6 +54,16 @@ rpicam-vid -t 5000 -n --codec mjpeg --framerate 1 --width 1640 --height 1232 -o 
   (or the overlay for your sensor), then reboot.
 - Image upside down → `"ExtraArgs": "--rotation 180"` in `Modules:Camera`.
 
+Timelapse videos need **ffmpeg** (about 100 MB). Either install it now, or later with one click in the
+dashboard (*Settings → Timelapse → Install*; works because the service user has passwordless sudo):
+
+```bash
+sudo apt install ffmpeg
+```
+
+Frames and videos are stored in `/opt/enclosurehub/timelapse` (deployments do not touch it). A 48-hour
+recording at the default 30 s interval needs roughly 1.7 GB of free space before it is rendered.
+
 ## 3. MQTT broker in Home Assistant
 
 1. *Settings → Add-ons → Add-on store* → **Mosquitto broker** → Install → Start (enable *Start on boot*).
@@ -128,7 +138,9 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 ## 5. Home Assistant
 
 - *Settings → Devices & services → MQTT → Devices → Printer Enclosure*: Camera, Camera active (switch;
-  ON = switched on and producing frames), CPU temperature, Wi-Fi signal.
+  ON = switched on and producing frames), Timelapse (switch; ON = recording, OFF = stop and render),
+  Timelapse rendering, CPU temperature, Wi-Fi signal.
+- Timelapse of every print: see the automation in the README (*Timelapse* section).
 - Dashboard: *Picture Entity* / *Picture Glance* card with the camera entity.
 - Camera only while printing – an automation on the PrusaLink printer state (adjust the entity ids to yours):
 
@@ -170,4 +182,6 @@ To remove the service: `sudo /opt/enclosurehub/enclosurehub --uninstall` (keeps 
 | Dashboard answers 404 | `Web:Dashboard:Enabled` is false in `appsettings.Local.json` – set it to true and restart |
 | Forgot the dashboard password | Edit or remove `Web:Auth` in `appsettings.Local.json` and restart |
 | Camera settings don't apply | `journalctl -u enclosurehub` should show `Camera settings changed` followed by `Starting rpicam-vid …`; the service must be able to write `appsettings.Local.json` |
+| Timelapse video not rendered | Dashboard *Timelapse* page shows the error; `journalctl -u enclosurehub | grep -i timelapse`. Missing ffmpeg → *Settings → Timelapse → Install*, then the recording is rendered automatically |
+| ffmpeg *Install* fails with "password" | The service user needs passwordless sudo; run `sudo apt install ffmpeg` on the Pi instead |
 | Service won't start | `systemctl status enclosurehub`; re-run `sudo /opt/enclosurehub/enclosurehub --install` after changing users |

@@ -20,6 +20,9 @@ public interface ISettingsSection
 
     string? Description { get; }
 
+    /// <summary>Tab the dashboard shows the section on, e.g. "Devices"; tabs appear in order of first use.</summary>
+    string Group => SettingsGroups.Devices;
+
     /// <summary>Editable fields. May depend on current values (e.g. include a custom value as a choice).</summary>
     IReadOnlyList<SettingField> Fields { get; }
 

@@ -5,6 +5,43 @@
 Camera module, system sensors, MQTT bridge with discovery, HTTP API with SSE, `--install` for the
 systemd service. Verified on a Raspberry Pi 2 with Camera Module 2 (about 70 MB RSS, 1 fps at 1640×1232).
 
+## Timelapse ✅
+
+Module `EnclosureHub.Timelapse`: a frame every N seconds from the camera's latest image, MP4 rendered with
+ffmpeg after stopping, library on the dashboard (play, download, delete), `timelapse` switch +
+`timelapse_rendering` sensor in Home Assistant, ffmpeg installable from the dashboard.
+
+Still open:
+
+- **Verify the hardware encoder on the Pi 2** (`h264_v4l2m2m`; the software path falls back automatically) and
+  measure libx264 render times for a 48 h recording; pick the default accordingly.
+- **Retention** – keep the last N videos / delete videos older than X days (settings), so the SD card never
+  fills up unattended.
+- **Video management over MQTT** – proposal below, not implemented.
+
+### Proposal: timelapse videos in Home Assistant (MQTT)
+
+MQTT is a poor transport for files (an MP4 of a long print is tens of MB), so Home Assistant should get
+*metadata, events and commands* over MQTT and fetch the files over HTTP when needed:
+
+1. **"Video ready" event** – HA `event` entity via discovery (`event` component, `event_types: [video_ready,
+   render_failed]`), state topic `{base}/timelapse/event` with
+   `{"event_type":"video_ready","name":"timelapse_…","url":"http://hub:8080/api/timelapse/videos/….mp4",
+   "thumbnail_url":"….jpg","duration":16,"size":24000000}`. Automations can then send a notification with the
+   thumbnail and a link, or copy the file into HA's media folder with `downloader.download_file` (viewable in
+   the HA media browser, backed up with HA).
+2. **Library state** – a `sensor` `timelapse_videos` (count) whose JSON attributes (`{base}/timelapse_videos/attributes`)
+   list the newest videos (name, created, duration, size, URLs) – enough for a Markdown card with links. Plus
+   `sensor` `timelapse_storage_free` (MB) for alerts.
+3. **Commands** – a `select` `timelapse_video` (options = video names, republished with discovery when the list
+   changes – keep it to the last ~20) and `button`s acting on the selection: *Delete video*, *Render again*.
+   A JSON command topic `{base}/timelapse/command` for scripts:
+   `{"action":"delete","name":"…"}`, `{"action":"delete_older_than","days":30}`, `{"action":"retry","name":"…"}`.
+   Destructive commands only by exact name (no wildcards) and logged.
+4. Entity model changes needed: a text-capable sensor / JSON attributes for any entity (today only cameras
+   have attributes), and new kinds `Button`, `Select`, `Event` mapped in `HomeAssistantDiscovery`; the timelapse
+   module would create them, so the MQTT bridge stays module-agnostic.
+
 ## M2 – Lighting
 
 Goal: LED strip inside the enclosure, controllable from Home Assistant and displays; bright neutral light for the camera.
@@ -63,6 +100,6 @@ it doubles as the reference client for the other options.
 
 ## Ideas
 
-- Timelapse: save a frame per layer / per N seconds during a print, assemble with ffmpeg.
+- Timelapse per layer (needs a layer-change signal from the printer, e.g. PrusaLink or a G-code macro) instead of per N seconds.
 - Door sensor (reed switch) → `BinarySensorEntity`.
 - Upload snapshots to Prusa Connect (optional, cloud).

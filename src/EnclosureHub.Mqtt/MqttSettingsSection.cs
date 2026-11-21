@@ -33,6 +33,8 @@ public sealed class MqttSettingsSection : ISettingsSection
 
     public string? Description => "How the camera appears in Home Assistant via MQTT. Broker address and login are set in appsettings.Local.json.";
 
+    public string Group => SettingsGroups.Integrations;
+
     public IReadOnlyList<SettingField> Fields { get; } =
     [
         new("cameraMode", "Camera in Home Assistant", SettingFieldType.Choice,

@@ -17,6 +17,7 @@
       <div class="brand-sub" id="device-name">&nbsp;</div>
     </div>
     <a href="#camera" data-page="camera">Camera</a>
+    <a href="#timelapse" data-page="timelapse">Timelapse</a>
     <a href="#status" data-page="status">Status</a>
     <a href="#settings" data-page="settings">Settings</a>
     <a href="#system" data-page="system">System</a>
@@ -29,6 +30,16 @@
       <div id="cameras"></div>
     </section>
 
+    <section id="page-timelapse" class="page">
+      <h1>Timelapse</h1>
+      <div id="timelapse-status" class="section"></div>
+      <div class="section">
+        <h2>Videos</h2>
+        <div class="note" id="timelapse-note"></div>
+        <div id="timelapse-videos" class="rows"></div>
+      </div>
+    </section>
+
     <section id="page-status" class="page">
       <h1>Status</h1>
       <p class="lead">All entities of this controller, updated live.</p>
@@ -38,6 +49,7 @@
     <section id="page-settings" class="page">
       <h1>Settings</h1>
       <p class="lead">Changes are saved to appsettings.Local.json on the device.</p>
+      <nav class="tabs" id="settings-tabs" aria-label="Settings groups"></nav>
       <div id="settings"></div>
     </section>
 

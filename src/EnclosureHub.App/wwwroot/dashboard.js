@@ -26,17 +26,19 @@
 
   // ---------------------------------------------------------------- routing
 
-  const pages = ['camera', 'status', 'settings', 'system'];
+  const pages = ['camera', 'timelapse', 'status', 'settings', 'system'];
   let currentPage = null;
 
+  // "#settings/timelapse" = page + optional tab
   function route() {
-    const requested = (location.hash || '#camera').slice(1);
+    const [requested, tab] = (location.hash || '#camera').slice(1).split('/');
     const page = pages.includes(requested) ? requested : 'camera';
     currentPage = page;
     document.querySelectorAll('.page').forEach(s => s.classList.toggle('active', s.id === 'page-' + page));
     document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.page === page));
-    if (page === 'settings') loadSettings();
+    if (page === 'settings') loadSettings().then(() => showSettingsTab(tab));
     if (page === 'system') loadSystem();
+    if (page === 'timelapse') loadTimelapse();
     updateCameraStreams();
   }
 
@@ -202,29 +204,57 @@
   // --------------------------------------------------------------- settings
 
   let settingsLoaded = false;
+  let settingsTab = null;     // group name of the visible tab
+  const settingsGroups = {};  // tab slug ("timelapse") -> group name ("Timelapse")
+  const slug = text => text.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
   async function loadSettings(force = false) {
     if (settingsLoaded && !force) return;
     const container = $('#settings');
+    const tabs = $('#settings-tabs');
     try {
       const sections = await api('/api/settings');
-      container.replaceChildren(...sections.map(renderSection));
+
+      // One tab per group, in order of first use; sections keep their order within a tab
+      const groups = [];
+      for (const s of sections) if (!groups.includes(s.group)) groups.push(s.group);
+      for (const g of groups) settingsGroups[slug(g)] = g;
+
+      tabs.replaceChildren(...groups.map(g => el('a', { href: '#settings/' + slug(g), 'data-group': g, text: g })));
+      container.replaceChildren(...groups.map(g => el('div', { class: 'tab-panel', 'data-group': g },
+        sections.filter(s => s.group === g).map(renderSection))));
       settingsLoaded = true;
+      showSettingsTab(settingsTab && slug(settingsTab));
     } catch (err) {
       container.replaceChildren(el('div', { class: 'note err', text: 'Could not load settings: ' + err.message }));
     }
   }
 
+  function showSettingsTab(tabSlug) {
+    const panels = [...document.querySelectorAll('#settings .tab-panel')];
+    if (panels.length === 0) return;
+    settingsTab = settingsGroups[tabSlug] || settingsTab || panels[0].dataset.group;
+    panels.forEach(p => p.classList.toggle('active', p.dataset.group === settingsTab));
+    document.querySelectorAll('#settings-tabs a').forEach(a => a.classList.toggle('active', a.dataset.group === settingsTab));
+    if (settingsTab === 'Timelapse') refreshTimelapseSettings();
+  }
+
+  // Section-specific additions to the generic form (live estimates, tool status, …)
+  const sectionExtras = {};
+
   function renderSection(section) {
     const inputs = {};
+    const rows = {};
     const grid = el('div', { class: 'grid-2' }, section.fields.map(field => {
       const control = renderField(field, section.values[field.key]);
       inputs[field.key] = control;
+      const text = el('div', {}, [
+        el('div', { class: 'label', text: field.label }),
+        field.description ? el('div', { class: 'desc', text: field.description }) : null,
+      ]);
+      rows[field.key] = text;
       return el('div', { class: 'row' }, [
-        el('div', {}, [
-          el('div', { class: 'label', text: field.label }),
-          field.description ? el('div', { class: 'desc', text: field.description }) : null,
-        ]),
+        text,
         el('div', { class: 'control' }, [control.node]),
       ]);
     }));
@@ -253,12 +283,14 @@
       }
     });
 
-    return el('div', { class: 'section' }, [
+    const node = el('div', { class: 'section' }, [
       el('h2', { text: section.title }),
       section.description ? el('p', { class: 'section-desc', text: section.description }) : null,
       grid,
       el('div', { class: 'section-footer' }, [save, note]),
     ]);
+    if (sectionExtras[section.id]) sectionExtras[section.id]({ node, grid, inputs, rows });
+    return node;
   }
 
   function renderField(field, value) {
@@ -289,6 +321,338 @@
         return { node: input, get: () => input.value, set };
       }
     }
+  }
+
+  // -------------------------------------------------------------- timelapse
+
+  let timelapse = null;           // last GET /api/timelapse: { switchId, status }; null = not loaded / module off
+  let timelapseDisabled = false;  // the API answered 404: module turned off
+  let timelapseVideosKey = null;  // the video list is re-rendered only when it changes
+  const AssumedFrameBytes = 300 * 1024;  // estimate basis while the camera delivers no frame
+
+  const formatSize = b => b == null ? '—'
+    : b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB`
+    : b >= 1048576 ? `${Math.round(b / 1048576)} MB`
+    : `${Math.max(1, Math.round(b / 1024))} kB`;
+  const formatDuration = seconds => {
+    const s = Math.round(seconds);
+    if (s < 60) return `${s} s`;
+    if (s < 3600) return s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s / 60} min`;
+    if (s >= 172800) return `${formatCount(s / 86400)} days`;
+    return `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')} min`;
+  };
+  const formatCount = n => Math.round(n).toLocaleString('en-US');
+  const pendingKey = t => t ? t.status.pending.map(p => p.name + ':' + p.state).join('|') : '';
+
+  async function fetchTimelapse() {
+    try {
+      timelapse = await api('/api/timelapse');
+      timelapseDisabled = false;
+    } catch (err) {
+      timelapse = null;
+      timelapseDisabled = err.message.startsWith('404');
+    }
+    $('.sidebar a[data-page="timelapse"]').style.display = timelapseDisabled ? 'none' : '';
+    return timelapse;
+  }
+
+  async function loadTimelapse() {
+    await fetchTimelapse();
+    renderTimelapseStatus();
+    await loadTimelapseVideos();
+  }
+
+  async function refreshTimelapse() {
+    const before = pendingKey(timelapse);
+    await fetchTimelapse();
+    if (!$('#timelapse-status .btn.armed')) renderTimelapseStatus(); // keep an armed "Discard" until it is confirmed
+    if (pendingKey(timelapse) !== before) loadTimelapseVideos(); // a render finished or failed
+  }
+
+  // Two-step button for destructive actions: first click arms it, second click within 5 s runs the action.
+  function confirmButton(label, action) {
+    const btn = el('button', { class: 'btn', type: 'button', text: label });
+    let armed = null;
+    const disarm = () => { clearTimeout(armed); armed = null; btn.classList.remove('armed'); btn.textContent = label; };
+    btn.addEventListener('click', async () => {
+      if (!armed) {
+        btn.classList.add('armed');
+        btn.textContent = 'Confirm';
+        armed = setTimeout(disarm, 5000);
+        return;
+      }
+      disarm();
+      btn.disabled = true;
+      try {
+        await action();
+      } catch (err) {
+        showTimelapseError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    return btn;
+  }
+
+  function showTimelapseError(message) {
+    const note = $('#timelapse-note');
+    note.className = 'note err';
+    note.textContent = message;
+  }
+
+  function renderTimelapseStatus() {
+    const container = $('#timelapse-status');
+    if (!timelapse) {
+      container.replaceChildren(el('div', { class: 'empty', text: timelapseDisabled
+        ? 'The timelapse module is turned off (Modules:Timelapse:Enabled in appsettings.Local.json).'
+        : 'Could not load the timelapse status.' }));
+      return;
+    }
+
+    const s = timelapse.status;
+    const cur = s.current;
+    const toggle = el('button', {
+      class: 'btn toggle', type: 'button', role: 'switch',
+      'aria-checked': s.recording ? 'true' : 'false', text: s.recording ? 'On' : 'Off',
+      title: s.recording ? 'Stop the recording and render the video' : 'Start a new recording',
+      onclick: () => sendOnOff(timelapse.switchId, !s.recording).then(refreshTimelapse),
+    });
+
+    const settingsLink = el('a', { href: '#settings/timelapse', style: 'text-decoration: underline', text: 'Settings' });
+    const recordingText = cur
+      ? [`Since ${new Date(cur.startedUtc).toLocaleString()} · ${formatDuration((Date.now() - Date.parse(cur.startedUtc)) / 1000)} · `
+          + `${formatCount(cur.frames)} frames · ${formatSize(cur.bytes)}`]
+      : [`A frame every ${s.intervalSeconds} s; stops automatically after ${s.maxDurationHours} h. `, settingsLink];
+
+    const rows = [
+      el('div', { class: 'row' }, [
+        el('div', {}, [
+          el('div', { class: 'label', text: s.recording ? 'Recording' : 'Not recording' }),
+          el('div', { class: 'sub' }, recordingText),
+        ]),
+        el('div', { class: 'control' }, [el('span', { class: 'dot ' + (s.recording ? 'on' : 'off') }), toggle]),
+      ]),
+    ];
+
+    const warning = text => el('div', { class: 'row' }, [el('div', { class: 'note err' }, text), el('div')]);
+    if (!s.ffmpeg.available) {
+      rows.push(warning(['ffmpeg is not installed, so videos cannot be rendered (frames are still saved). ',
+        el('a', { href: '#settings/timelapse', style: 'text-decoration: underline', text: 'Install it in Settings' }), '.']));
+    }
+    if (s.recording && !s.cameraAvailable) {
+      rows.push(warning('The camera is off or not delivering frames – nothing is being saved until it runs again.'));
+    }
+
+    // How long the disk lasts at the current interval (frames + the video rendered from them)
+    const { frameBytes, videoBytes } = timelapseSizes(s);
+    const hoursLeft = s.freeBytes != null ? s.freeBytes / ((frameBytes + videoBytes) * 3600 / s.intervalSeconds) : null;
+    rows.push(el('div', { class: 'row' }, [
+      el('div', {}, [
+        el('div', { class: 'label', text: 'Storage' }),
+        el('div', { class: 'sub', text: hoursLeft == null ? 'Free space unknown'
+          : `Room for about ${formatDuration(hoursLeft * 3600)} of recording at the current interval` }),
+      ]),
+      el('div', { class: 'control' }, [el('span', { class: 'value', text: `${formatSize(s.freeBytes)} free` })]),
+    ]));
+
+    for (const p of s.pending) {
+      const state = p.state === 'rendering' ? `Rendering · ${Math.round((p.progress || 0) * 100)} %`
+        : p.state === 'queued' ? 'Waiting to be rendered'
+        : 'Rendering failed' + (p.error ? ': ' + p.error : '');
+      const control = el('div', { class: 'control' });
+      if (p.state === 'failed') {
+        control.append(
+          el('button', { class: 'btn', type: 'button', text: 'Retry', onclick: () =>
+            api(`/api/timelapse/recordings/${encodeURIComponent(p.name)}/render`, { method: 'POST' })
+              .then(refreshTimelapse).catch(err => showTimelapseError(err.message)) }),
+          confirmButton('Discard', async () => {
+            await api(`/api/timelapse/recordings/${encodeURIComponent(p.name)}`, { method: 'DELETE' });
+            await refreshTimelapse();
+          }));
+      } else {
+        control.append(el('span', { class: 'dot ' + (p.state === 'rendering' ? 'on' : 'off') }));
+      }
+      rows.push(el('div', { class: 'row' }, [
+        el('div', {}, [
+          el('div', { class: 'label', text: p.name }),
+          el('div', { class: 'sub' + (p.state === 'failed' ? ' err' : ''), text: `${state} · ${formatCount(p.frames)} frames · ${formatSize(p.bytes)}` }),
+        ]),
+        control,
+      ]));
+    }
+
+    container.replaceChildren(el('div', { class: 'rows' }, rows));
+  }
+
+  async function loadTimelapseVideos() {
+    const list = $('#timelapse-videos');
+    if (!timelapse) {
+      list.replaceChildren();
+      timelapseVideosKey = null;
+      return;
+    }
+
+    let videos;
+    try {
+      videos = await api('/api/timelapse/videos');
+    } catch (err) {
+      showTimelapseError('Could not load the videos: ' + err.message);
+      return;
+    }
+
+    const key = videos.map(v => v.name + ':' + v.sizeBytes).join('|');
+    if (key === timelapseVideosKey) return;
+    timelapseVideosKey = key;
+
+    if (videos.length === 0) {
+      list.replaceChildren(el('div', { class: 'empty', text: 'No videos yet. Start a recording above; the video appears here once it is rendered.' }));
+      return;
+    }
+
+    list.replaceChildren(...videos.map(v => {
+      const base = `/api/timelapse/videos/${encodeURIComponent(v.name)}`;
+      const recorded = v.startedUtc && v.stoppedUtc ? (Date.parse(v.stoppedUtc) - Date.parse(v.startedUtc)) / 1000 : null;
+      const details = [
+        v.durationSeconds != null ? `${formatDuration(v.durationSeconds)} video` : null,
+        v.frames != null ? `${formatCount(v.frames)} frames at ${v.fps} fps` : null,
+        recorded != null ? `recorded ${formatDuration(recorded)}` : null,
+        formatSize(v.sizeBytes),
+      ].filter(Boolean).join(' · ');
+
+      return el('div', { class: 'row video' }, [
+        el('div', { class: 'video-info' }, [
+          el('a', { class: 'thumb', href: base + '.mp4', target: '_blank', rel: 'noopener', title: 'Play' },
+            v.hasThumbnail ? [el('img', { src: base + '.jpg', alt: '', loading: 'lazy' })] : []),
+          el('div', {}, [
+            el('div', { class: 'label', text: new Date(v.startedUtc || v.createdUtc).toLocaleString() }),
+            el('div', { class: 'sub', text: v.name }),
+            el('div', { class: 'sub', text: details }),
+          ]),
+        ]),
+        el('div', { class: 'control' }, [
+          el('a', { class: 'btn', href: base + '.mp4', target: '_blank', rel: 'noopener', text: 'Play' }),
+          el('a', { class: 'btn', href: base + '.mp4?download=true', download: v.name + '.mp4', text: 'Download' }),
+          confirmButton('Delete', async () => {
+            await api(base, { method: 'DELETE' });
+            await loadTimelapseVideos();
+          }),
+        ]),
+      ]);
+    }));
+  }
+
+  // Settings → Timelapse: ffmpeg status with an install button, live storage estimates under the fields
+  let timelapseSettingsView = null;
+
+  sectionExtras.timelapse = ({ grid, inputs, rows }) => {
+    const dot = el('span', { class: 'dot' });
+    const value = el('span', { class: 'value' });
+    const note = el('div', { class: 'note' });
+    const install = el('button', { class: 'btn', type: 'button', text: 'Install', style: 'display:none' });
+    install.addEventListener('click', async () => {
+      install.disabled = true;
+      try {
+        await api('/api/timelapse/ffmpeg/install', { method: 'POST' });
+      } catch (err) {
+        note.className = 'note err';
+        note.textContent = err.message;
+      }
+      refreshTimelapseSettings();
+    });
+
+    grid.before(el('div', { class: 'row' }, [
+      el('div', {}, [
+        el('div', { class: 'label', text: 'ffmpeg' }),
+        el('div', { class: 'desc', text: 'Required: renders the saved frames into an MP4 video. Installed from the Raspberry Pi OS packages (apt install ffmpeg, about 100 MB).' }),
+        note,
+      ]),
+      el('div', { class: 'control' }, [dot, value, install]),
+    ]));
+
+    const diskValue = el('span', { class: 'value' });
+    const diskSub = el('div', { class: 'desc' });
+    grid.before(el('div', { class: 'row' }, [
+      el('div', {}, [el('div', { class: 'label', text: 'Free disk space' }), diskSub]),
+      el('div', { class: 'control' }, [diskValue]),
+    ]));
+
+    const intervalEstimate = el('div', { class: 'estimate' });
+    const maxEstimate = el('div', { class: 'estimate' });
+    rows.interval.append(intervalEstimate);
+    rows.maxHours.append(maxEstimate);
+    for (const key of ['interval', 'maxHours', 'videoFps']) {
+      inputs[key].node.addEventListener('input', updateTimelapseEstimates);
+      inputs[key].node.addEventListener('change', updateTimelapseEstimates);
+    }
+
+    timelapseSettingsView = { dot, value, note, install, diskValue, diskSub, intervalEstimate, maxEstimate, inputs };
+  };
+
+  async function refreshTimelapseSettings() {
+    await fetchTimelapse();
+    const v = timelapseSettingsView;
+    if (!v || !timelapse) return;
+
+    const f = timelapse.status.ffmpeg;
+    const installing = f.installState === 'running';
+    v.dot.className = 'dot ' + (f.available ? 'on' : installing ? '' : 'err');
+    v.value.textContent = f.available ? 'Installed' + (f.version ? ' · ' + f.version : '') : installing ? 'Installing…' : 'Not installed';
+    v.install.style.display = !f.available && f.canInstall ? '' : 'none';
+    v.install.disabled = installing;
+    v.note.className = 'note' + (f.installState === 'failed' ? ' err' : f.installState === 'succeeded' ? ' ok' : '');
+    v.note.textContent = f.installState !== 'idle' ? (f.installMessage || '')
+      : !f.available && !f.canInstall ? 'Install it on the device: sudo apt install ffmpeg' : '';
+    updateTimelapseEstimates();
+  }
+
+  function updateTimelapseEstimates() {
+    const v = timelapseSettingsView;
+    if (!v) return;
+    const s = timelapse && timelapse.status;
+    const interval = Number(v.inputs.interval.get());
+    const hours = Number(v.inputs.maxHours.get());
+    const fps = Number(v.inputs.videoFps.get()) || 30;
+    const { frameBytes, videoBytes } = timelapseSizes(s);
+    const basis = (s && s.averageFrameBytes
+        ? `${formatSize(frameBytes)} per frame (${s.current && s.current.frames ? 'average of this recording' : 'current camera picture'})`
+        : `an assumed ${formatSize(frameBytes)} per frame – turn the camera on for a real figure`)
+      + (s && s.videoBytesPerFrame ? ', video size measured on your videos' : ', video assumed at 15 % of the frames');
+
+    const free = s ? s.freeBytes : null;
+    v.diskValue.textContent = free == null ? 'Unknown' : `${formatSize(free)} free`;
+    v.diskSub.textContent = free != null && interval > 0
+      ? `Currently, on the disk holding the timelapse data. Enough for about ${formatDuration(free / ((frameBytes + videoBytes) * 3600 / interval) * 3600)} `
+        + 'of recording at this interval, including rendering the video.'
+      : 'Currently, on the disk holding the timelapse data.';
+
+    if (!(interval > 0)) {
+      v.intervalEstimate.textContent = v.maxEstimate.textContent = '';
+      return;
+    }
+
+    // While a recording is rendered, its frames and the new video are on disk together; afterwards only the video stays
+    const framesPerHour = 3600 / interval;
+    v.intervalEstimate.textContent = `1 hour of recording ≈ ${formatCount(framesPerHour)} frames: ${formatSize(framesPerHour * frameBytes)} of frames `
+      + `+ about ${formatSize(framesPerHour * videoBytes)} for ${formatDuration(framesPerHour / fps)} of video. Based on ${basis}.`;
+
+    if (!(hours > 0)) {
+      v.maxEstimate.textContent = '';
+      return;
+    }
+    const frames = framesPerHour * hours;
+    const peak = frames * (frameBytes + videoBytes);
+    const tooBig = free != null && peak > free;
+    v.maxEstimate.className = 'estimate' + (tooBig ? ' err' : '');
+    v.maxEstimate.textContent = `${hours} h ≈ ${formatCount(frames)} frames: ${formatSize(frames * frameBytes)} of frames + about `
+      + `${formatSize(frames * videoBytes)} video (${formatDuration(frames / fps)}) = ${formatSize(peak)} needed while rendering. `
+      + 'Afterwards the frames are deleted and only the video stays.'
+      + (tooBig ? ` Only ${formatSize(free)} is free – a recording stops early when the disk is nearly full.` : '');
+  }
+
+  // Bytes per saved frame and per frame of rendered video (same 15 % fallback as the server's disk guard)
+  function timelapseSizes(s) {
+    const frameBytes = (s && s.averageFrameBytes) || AssumedFrameBytes;
+    return { frameBytes, videoBytes: (s && s.videoBytesPerFrame) || frameBytes * 0.15 };
   }
 
   // ----------------------------------------------------------------- system
@@ -385,8 +749,16 @@
         renderCameras();
         updateCameraStreams();
       }
+      const timelapseId = timelapse ? timelapse.switchId : 'timelapse';
+      if ((e.id === timelapseId || e.id === timelapseId + '_rendering') && currentPage === 'timelapse') refreshTimelapse();
     });
   }
+
+  // Timelapse progress (frames, render percentage, ffmpeg installation) is polled while it is on screen.
+  setInterval(() => {
+    if (currentPage === 'timelapse') refreshTimelapse();
+    else if (currentPage === 'settings' && settingsTab === 'Timelapse') refreshTimelapseSettings();
+  }, 3000);
 
   // Camera entity state (frame age) does not raise change events – refresh it while the camera page is open.
   setInterval(async () => {
@@ -414,6 +786,7 @@
     }
     renderEntities();
     renderCameras();
+    await fetchTimelapse(); // hides the Timelapse page when the module is off
     route();
     connectEvents();
     api('/api/system').then(s => { $('#device-name').textContent = s.device; document.title = `${s.device} · Enclosure Hub`; }).catch(() => {});

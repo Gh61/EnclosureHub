@@ -21,6 +21,8 @@ internal sealed class WebDashboardSettingsSection : ISettingsSection
 
     public string? Description => "This user interface. The HTTP API and Home Assistant integration are not affected by it.";
 
+    public string Group => SettingsGroups.Integrations;
+
     public IReadOnlyList<SettingField> Fields { get; } =
     [
         new("enabled", "Web dashboard", SettingFieldType.Toggle,

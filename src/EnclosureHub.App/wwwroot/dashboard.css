@@ -239,6 +239,50 @@ input[type="number"] { width: 110px; }
 
 .empty { color: var(--muted); padding: 24px 0; }
 
+/* ---- Settings tabs ---- */
+
+.tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--line);
+  margin: -8px 0 28px;
+}
+.tabs a {
+  padding: 8px 0 10px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tabs a:hover { color: var(--fg); }
+.tabs a.active { color: var(--fg); border-bottom-color: var(--fg); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.estimate { color: var(--fg); font-size: 13px; margin-top: 8px; max-width: 420px; }
+.estimate.err, .sub.err { color: var(--warn); }
+
+/* ---- Timelapse ---- */
+
+a.btn { display: inline-flex; align-items: center; justify-content: center; }
+
+.video .video-info { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.video .video-info > div { min-width: 0; }
+.video .thumb {
+  flex: none;
+  width: 128px;
+  aspect-ratio: 4 / 3;
+  background: #050505;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.video .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.video .control { flex-wrap: wrap; align-self: center; }
+.video .control .btn { min-width: 0; }
+#timelapse-note:empty { display: none; }
+#timelapse-note { margin: 8px 0; }
+
 /* ---- Narrow screens: navigation on top ---- */
 
 @media (max-width: 760px) {

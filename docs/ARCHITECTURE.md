@@ -13,6 +13,7 @@
 src/
   EnclosureHub.Core     Entity model, registry, camera abstraction, settings abstraction. No dependencies.
   EnclosureHub.Camera   Camera module: rpicam-vid → latest JPEG frame; camera settings section.
+  EnclosureHub.Timelapse Timelapse module: saves a camera entity's latest frame periodically, renders with ffmpeg.
   EnclosureHub.Mqtt     MQTT adapter: Home Assistant discovery, state, images (MQTTnet 4.x).
   EnclosureHub.App      Host: configuration, DI, HTTP API, web dashboard (wwwroot), Basic auth,
                         settings store, built-in system sensors module, --install/--uninstall.
@@ -77,8 +78,31 @@ Modules can expose settings for editing at runtime without the UI knowing anythi
   `appsettings.Local.json` (atomic replace, file mode preserved) and calls `IConfigurationRoot.Reload()`,
   which fires the option monitors.
 
-`GET/PUT /api/settings` exposes all sections; the dashboard renders them generically. Settings that are
-secrets or rarely change (MQTT, `Web:Auth`) are deliberately file-only.
+`GET/PUT /api/settings` exposes all sections; the dashboard renders them generically, grouped into tabs by
+`ISettingsSection.Group` (`SettingsGroups`: Devices, Timelapse, Integrations; tabs in order of first use).
+A section may get small dashboard-side extras keyed by its id (`sectionExtras` in `dashboard.js`; the
+timelapse section adds the ffmpeg status and live storage estimates). Settings that are secrets or rarely
+change (MQTT, `Web:Auth`) are deliberately file-only.
+
+## Timelapse (`EnclosureHub.Timelapse`)
+
+A module that consumes another module's entity instead of hardware: it finds the camera entity
+(`Modules:Timelapse:CameraId`) in the registry and, while recording, writes `Source.LatestFrame` to
+`{Directory}/sessions/{name}/000001.jpg …` every `IntervalSeconds` (new frames from an available camera only).
+It never talks to rpicam itself, so the camera runs unchanged.
+
+- Entities: `timelapse` switch (ON = recording; OFF stops and queues the render) and `timelapse_rendering`
+  binary sensor. They are created in `TimelapseEntities`, apart from the service, because the service needs
+  `IEntityRegistry`, which collects them. Starting can turn the camera on through its `{camera}_active` switch.
+- State lives on disk (`session.json`: recording / queued / failed), so a restart resumes the recording and
+  re-renders queued sessions. Limits: `MaxDurationHours`, `MinFreeMegabytes`.
+- Rendering: one ffmpeg at a time, idle priority (`nice 19`), `-progress pipe:1` for the percentage; output to
+  `videos/{name}.mp4` (+ `.jpg` thumbnail, `.json` metadata), then the frames are deleted. Failures keep the
+  frames (retry/discard via the API); the hardware encoder falls back to libx264.
+- ffmpeg is required; `Ffmpeg` detects it (re-checks every 10 s while missing) and can install it with
+  `sudo -n apt-get install ffmpeg` on request, then re-queues failed renders.
+- Adapters see it only through `ITimelapseService` (Core): `TimelapseApi` maps `/api/timelapse/*` when it is
+  registered. Names are validated (`[A-Za-z0-9][A-Za-z0-9_-]*`) before touching files.
 
 ## Adapters
 
@@ -139,4 +163,5 @@ stream is attached only while the Camera page is visible to spare the Pi.
 
 - Workstation GC, no concurrent GC, invariant globalization (see `EnclosureHub.App.csproj`).
 - Camera runs one long-lived `rpicam-vid` at 1 fps, software MJPEG – negligible CPU.
+- Timelapse capture is a file write every interval; rendering is CPU-heavy but runs at idle priority.
 - Publish self-contained with ReadyToRun to cut startup time; never build on the Pi.

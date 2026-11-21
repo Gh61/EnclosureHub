@@ -10,3 +10,6 @@ TestResults/
 
 # Local configuration with secrets (MQTT password etc.)
 appsettings.Local.json
+
+# Timelapse frames and videos when running locally (Modules:Timelapse:Directory)
+src/EnclosureHub.App/timelapse/

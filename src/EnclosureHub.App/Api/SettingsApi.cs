@@ -61,10 +61,11 @@ internal static class SettingsApi
         string Id,
         string Title,
         string? Description,
+        string Group,
         IReadOnlyList<SettingField> Fields,
         IReadOnlyDictionary<string, object?> Values)
     {
         public static SectionDto From(ISettingsSection section)
-            => new(section.Id, section.Title, section.Description, section.Fields, section.GetValues());
+            => new(section.Id, section.Title, section.Description, section.Group, section.Fields, section.GetValues());
     }
 }

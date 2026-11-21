@@ -145,6 +145,14 @@ internal static class ServiceInstaller
             Console.WriteLine("  sudo apt install rpicam-apps-lite");
         }
 
+        if (TimelapseEnabled(appDir) && FindOnPath("ffmpeg") == null)
+        {
+            // Required to render timelapse videos; frames are still recorded without it.
+            Console.WriteLine();
+            Console.WriteLine("Warning: 'ffmpeg' was not found; timelapse videos cannot be rendered. Install it with:");
+            Console.WriteLine("  sudo apt install ffmpeg      (or: dashboard → Settings → Timelapse → Install)");
+        }
+
         Console.WriteLine();
         Console.WriteLine($"Logs:   journalctl -u {ServiceName} -f");
         Console.WriteLine($"Status: systemctl status {ServiceName}");
@@ -216,6 +224,24 @@ internal static class ServiceInstaller
         catch
         {
             return "rpicam-vid";
+        }
+    }
+
+    private static bool TimelapseEnabled(string appDir)
+    {
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .SetBasePath(appDir)
+                .AddJsonFile("appsettings.json", optional: true)
+                .AddJsonFile("appsettings.Local.json", optional: true)
+                .Build();
+
+            return config.GetValue("Modules:Timelapse:Enabled", true);
+        }
+        catch
+        {
+            return true;
         }
     }
 

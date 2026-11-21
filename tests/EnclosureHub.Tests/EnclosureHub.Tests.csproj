@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\EnclosureHub.Core\EnclosureHub.Core.csproj" />
     <ProjectReference Include="..\..\src\EnclosureHub.Camera\EnclosureHub.Camera.csproj" />
+    <ProjectReference Include="..\..\src\EnclosureHub.Timelapse\EnclosureHub.Timelapse.csproj" />
     <ProjectReference Include="..\..\src\EnclosureHub.Mqtt\EnclosureHub.Mqtt.csproj" />
     <ProjectReference Include="..\..\src\EnclosureHub.App\EnclosureHub.App.csproj" />
   </ItemGroup>
