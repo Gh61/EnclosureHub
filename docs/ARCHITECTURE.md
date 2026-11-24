@@ -104,7 +104,13 @@ change (MQTT, `Web:Auth`) are deliberately file-only.
   `Done printing file` ends a print (finished and cancelled, per `finalize_print` in the firmware); `Not SD printing`
   does not (also reported while paused); losing the port does.
 - Writes only `M155 S{n}` / `M27` (when `Query`) and `M115` on request; `M155 S0` once when queries are switched off
-  or the printer is unlinked. A ring buffer keeps the last 500 lines for the Printer page.
+  or the printer is unlinked. `M27` goes out only when the previous query was answered (`ok`) and no `echo:busy`
+  came within 5 s – during blocking commands the firmware does not read its input, and piled-up queries made the
+  2 s write timeout fire (which once dropped the connection and, with it, the timelapse). A write timeout is now
+  just logged. A ring buffer keeps the last 500 lines for the Printer page.
+- Lines are assembled from raw bytes (`SerialPort.Read`), not `ReadLine`, so a read timeout never cuts a line.
+- A lost port during a print starts a 60 s grace period; after a reconnect the first `M27` answer decides
+  (`SD printing` = continue, `Not SD printing` = finished). Unlinking ends it immediately.
 - Entities exist only if the printer was linked and `Entities` on at startup (the entity set is fixed).
 
 Consumers: the timelapse (layer frames, follow the print) and the camera (layer frames). Planned: light/fan rules.

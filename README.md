@@ -201,8 +201,12 @@ What the hub learns from the printer (observed on an MK4S, checked against the B
 | `SD printing byte A/B` | Answer to `M27`: progress, or a print running when the hub connects mid-print |
 
 With *Query the printer* on (default) the hub sends `M155 S5` once and `M27` every 10 s – read-only commands
-like OctoPrint uses. Off = listen only (start, layers and end still work). `M27` answers *Not SD printing*
-while paused, so it never ends a print by itself; a printer that disappears (switched off) does.
+like OctoPrint uses. Off = listen only (start, layers and end still work). While the printer runs a blocking
+command (heating, homing, mesh probing) it does not read the USB input and reports `echo:busy: processing` every
+2 s; the hub then holds its queries back (and only sends the next one after the previous was answered), so they
+never pile up. `M27` answers *Not SD printing* while paused, so it never ends a print by itself. A lost connection
+does not end a print either: only a printer that stays away for more than 60 s (switched off), or answers *Not
+SD printing* right after coming back, does. The Printer page hides temperature and busy lines unless you ask for them.
 
 What uses the link (all only while the printer is linked; the values are kept when it is not):
 

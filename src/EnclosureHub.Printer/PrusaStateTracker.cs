@@ -13,15 +13,30 @@ namespace EnclosureHub.Printer;
 /// <item>"Done printing file" when a print ends – finished or cancelled (<c>finalize_print</c>); not on pause,</item>
 /// <item>" T:28.00/0.00 B:28.21/0.00 …" temperatures (while heating, or every few seconds after M155),</item>
 /// <item>"SD printing byte 123/456" / "Not SD printing" for M27. "Not SD printing" also while paused, so it never ends a print.</item>
+/// <item>"echo:busy: processing" every 2 s while a blocking command runs (heating, homing, mesh probing): the firmware
+/// does not read the serial input then, so queries must wait or they fill the buffer and the write times out.</item>
 /// </list>
-/// Not thread-safe; the connection feeds it from its reader thread.
+/// A lost connection during a print is not the end of the print: only when the printer stays away longer than the
+/// grace period, or answers "Not SD printing" right after coming back, the print counts as finished.
+/// Not thread-safe; the connection calls it under its lock.
 /// </summary>
 internal sealed partial class PrusaStateTracker
 {
     /// <summary>Z steps larger than this are travel (start position, parking at the end), not a new layer.</summary>
     private const double MaxLayerStep = 1.5;
 
+    /// <summary>Queries wait while the printer reported "busy" within this time.</summary>
+    private static readonly TimeSpan BusyHold = TimeSpan.FromSeconds(5);
+
+    /// <summary>An answer that never came (lost "ok") stops blocking queries after this time.</summary>
+    private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(60);
+
     private double? _layerZ;
+    private int _pendingReplies;
+    private DateTime _pendingSinceUtc;
+    private DateTime _lastBusyUtc;
+    private DateTime? _lostWhilePrintingUtc;
+    private bool _verifyAfterReconnect;
 
     public bool Printing { get; private set; }
 
@@ -45,11 +60,20 @@ internal sealed partial class PrusaStateTracker
     public IReadOnlyList<PrinterEvent> Consume(string line, DateTime utc)
     {
         line = line.Trim();
-        if (line.StartsWith("ok", StringComparison.Ordinal))
+        if (line == "ok" || line.StartsWith("ok ", StringComparison.Ordinal))
+        {
+            Acknowledged();
             line = line[2..].Trim(); // "ok T:…" answers carry the report after "ok"
+        }
 
         if (line.Length == 0)
+            return []; // a bare "ok" (handled by the caller via Acknowledged)
+
+        if (line.StartsWith("echo:busy:", StringComparison.Ordinal))
+        {
+            _lastBusyUtc = utc;
             return [];
+        }
 
         if (line.StartsWith("File opened:", StringComparison.Ordinal))
         {
@@ -60,8 +84,20 @@ internal sealed partial class PrusaStateTracker
         if (line.StartsWith("Done printing file", StringComparison.Ordinal))
             return FinishPrint("done printing file", utc);
 
+        if (line.StartsWith("Not SD printing", StringComparison.Ordinal))
+        {
+            // First status after a reconnect: the printer restarted or the print ended while we were away.
+            // Otherwise ignored – a paused print answers the same.
+            if (!_verifyAfterReconnect)
+                return [];
+            _verifyAfterReconnect = false;
+            return FinishPrint("not printing after the connection came back", utc);
+        }
+
         if (line.StartsWith("SD printing byte", StringComparison.Ordinal))
         {
+            _verifyAfterReconnect = false;
+
             // Connected in the middle of a print
             var events = Printing ? [] : StartPrint(File, utc);
 
@@ -81,9 +117,71 @@ internal sealed partial class PrusaStateTracker
         return [];
     }
 
-    /// <summary>The printer disappeared (switched off, cable pulled): a running print is over for us.</summary>
-    public IReadOnlyList<PrinterEvent> Disconnected(DateTime utc)
-        => FinishPrint("printer disconnected", utc);
+    /// <summary>A received line was a bare "ok" or started with it: one query answered.</summary>
+    public void Acknowledged()
+    {
+        if (_pendingReplies > 0)
+            _pendingReplies--;
+    }
+
+    /// <summary>Remembers a query sent to the printer (answered by "ok").</summary>
+    public void QuerySent(DateTime utc)
+    {
+        if (_pendingReplies++ == 0)
+            _pendingSinceUtc = utc;
+    }
+
+    /// <summary>
+    /// A periodic query may be sent: the previous one was answered and the printer is not busy with a blocking
+    /// command. A reply that never came stops blocking after <see cref="ReplyTimeout"/>.
+    /// </summary>
+    public bool CanQuery(DateTime utc)
+    {
+        if (utc - _lastBusyUtc < BusyHold)
+            return false;
+
+        if (_pendingReplies > 0 && utc - _pendingSinceUtc < ReplyTimeout)
+            return false;
+
+        _pendingReplies = 0;
+        return true;
+    }
+
+    /// <summary>The port was opened (again). Outstanding replies of the old connection are void.</summary>
+    public void Connected(bool expectStatus)
+    {
+        _pendingReplies = 0;
+        if (_lostWhilePrintingUtc != null)
+        {
+            _lostWhilePrintingUtc = null;
+            _verifyAfterReconnect = expectStatus; // the first M27 answer tells whether the print is still running
+        }
+    }
+
+    /// <summary>The port was lost. A running print continues for now; see <see cref="CheckLost"/>.</summary>
+    public void ConnectionLost(DateTime utc)
+    {
+        if (Printing && _lostWhilePrintingUtc == null)
+            _lostWhilePrintingUtc = utc;
+    }
+
+    /// <summary>The printer stayed away longer than <paramref name="grace"/> (switched off): the print is over for us.</summary>
+    public IReadOnlyList<PrinterEvent> CheckLost(DateTime utc, TimeSpan grace)
+    {
+        if (_lostWhilePrintingUtc is not { } lost || utc - lost < grace)
+            return [];
+
+        _lostWhilePrintingUtc = null;
+        return FinishPrint("printer disconnected", utc);
+    }
+
+    /// <summary>Unlinked: the print is over for us right away.</summary>
+    public IReadOnlyList<PrinterEvent> Unlinked(DateTime utc)
+    {
+        _lostWhilePrintingUtc = null;
+        _verifyAfterReconnect = false;
+        return FinishPrint("printer unlinked", utc);
+    }
 
     private IReadOnlyList<PrinterEvent> StartPrint(string? file, DateTime utc)
     {

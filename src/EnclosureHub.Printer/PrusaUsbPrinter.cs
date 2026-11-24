@@ -18,6 +18,9 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
     private const int LogCapacity = 500;
     private static readonly TimeSpan ReadInfoTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>A print survives a lost connection this long (USB hiccup, reconnect); longer = printer switched off.</summary>
+    private static readonly TimeSpan DisconnectGrace = TimeSpan.FromSeconds(60);
+
     private readonly IOptionsMonitor<PrinterOptions> _options;
     private readonly PrinterEntities _entities;
     private readonly ILogger<PrusaUsbPrinter> _logger;
@@ -96,11 +99,16 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
             using var cycle = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, wake.Token);
             var options = _options.CurrentValue;
 
+            // A print whose printer stayed away too long is over
+            RaiseUnderLock(t => t.CheckLost(DateTime.UtcNow, DisconnectGrace));
+
             try
             {
                 if (!options.Linked)
                 {
                     SetError(null);
+                    RaiseUnderLock(t => t.Unlinked(DateTime.UtcNow));
+                    UpdateEntities();
                     await Task.Delay(Timeout.Infinite, cycle.Token);
                     continue;
                 }
@@ -146,6 +154,7 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
             _port = port;
             _portName = portName;
             _error = null;
+            _tracker.Connected(expectStatus: options.Query);
         }
 
         AddLog(PrinterLogDirection.Info, "Connected to " + portName);
@@ -172,7 +181,12 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(2, options.StatusIntervalSeconds)));
             while (!reader.IsCompleted && await WhenTickOrDoneAsync(timer, reader, cancellationToken))
             {
-                if (_options.CurrentValue.Query)
+                // Only when the last query was answered and no blocking command runs (the printer does not read then)
+                bool canQuery;
+                lock (_gate)
+                    canQuery = _tracker.CanQuery(DateTime.UtcNow);
+
+                if (_options.CurrentValue.Query && canQuery)
                     Send(port, "M27");
             }
         }
@@ -201,10 +215,9 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
             AddLog(PrinterLogDirection.Info, "Disconnected");
             _logger.LogInformation("Printer disconnected");
 
-            List<PrinterEvent> events;
+            // Not the end of a print yet: the printer may be back in a few seconds (see DisconnectGrace)
             lock (_gate)
-                events = [.. _tracker.Disconnected(DateTime.UtcNow)];
-            Raise(events);
+                _tracker.ConnectionLost(DateTime.UtcNow);
             UpdateEntities();
         }
     }
@@ -231,14 +244,18 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
         return port;
     }
 
+    /// <summary>Reads raw bytes and splits lines itself (no ReadLine: a read timeout must never drop a partial line).</summary>
     private void ReadLoop(SerialPort port, CancellationToken cancellationToken)
     {
+        var buffer = new byte[4096];
+        var line = new System.Text.StringBuilder(256);
+
         while (!cancellationToken.IsCancellationRequested)
         {
-            string line;
+            int read;
             try
             {
-                line = port.ReadLine();
+                read = port.Read(buffer, 0, buffer.Length);
             }
             catch (TimeoutException)
             {
@@ -251,7 +268,19 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
                 return; // unplugged / switched off / closed
             }
 
-            OnLine(line.TrimEnd('\r'));
+            for (int i = 0; i < read; i++)
+            {
+                char c = (char)buffer[i];
+                if (c == '\n')
+                {
+                    OnLine(line.ToString().TrimEnd('\r'));
+                    line.Clear();
+                }
+                else if (line.Length < 4096)
+                {
+                    line.Append(c);
+                }
+            }
         }
     }
 
@@ -303,11 +332,35 @@ public sealed class PrusaUsbPrinter : BackgroundService, IPrinterConnection
         }
     }
 
-    private void Send(SerialPort port, string command)
+    /// <summary>
+    /// Writes one command. A write that times out (the printer is not reading, e.g. during a blocking command) is
+    /// logged and skipped – it never drops the connection.
+    /// </summary>
+    private bool Send(SerialPort port, string command)
     {
-        lock (port)
-            port.Write(command + "\n");
+        try
+        {
+            lock (port)
+                port.Write(command + "\n");
+        }
+        catch (TimeoutException)
+        {
+            AddLog(PrinterLogDirection.Info, "Printer busy, not sent: " + command);
+            return false;
+        }
+
+        lock (_gate)
+            _tracker.QuerySent(DateTime.UtcNow);
         AddLog(PrinterLogDirection.Out, command);
+        return true;
+    }
+
+    private void RaiseUnderLock(Func<PrusaStateTracker, IReadOnlyList<PrinterEvent>> action)
+    {
+        List<PrinterEvent> events;
+        lock (_gate)
+            events = [.. action(_tracker)];
+        Raise(events);
     }
 
     // ------------------------------------------------------------------ printer information (M115)

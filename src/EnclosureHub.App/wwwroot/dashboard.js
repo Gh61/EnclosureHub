@@ -808,15 +808,15 @@
     renderPrinterLog();
   }
 
-  // Temperature reports come every few seconds and would bury everything else; hidden unless asked for
-  const isTemperatureLine = e => e.direction === 'in' && /^(ok\s+)?T:/.test(e.text.trim());
+  // Temperature reports and "busy" keepalives (every 2 s during heating, homing, probing) would bury everything else
+  const isRoutineLine = e => e.direction === 'in' && /^((ok\s+)?T:|echo:busy:)/.test(e.text.trim());
 
   function renderPrinterLog() {
     const box = $('#printer-log');
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     const showTemps = $('#printer-log-temps').checked;
     const marks = { in: '<', out: '>', info: '·' };
-    const lines = printerLog.filter(e => showTemps || !isTemperatureLine(e)).map(e =>
+    const lines = printerLog.filter(e => showTemps || !isRoutineLine(e)).map(e =>
       el('div', { class: 'log-line dir-' + e.direction }, [
         el('span', { class: 'log-time', text: formatTime(e.utc) }),
         el('span', { class: 'log-dir', text: marks[e.direction] || '?' }),

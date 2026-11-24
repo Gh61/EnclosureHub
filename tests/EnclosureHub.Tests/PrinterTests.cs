@@ -91,9 +91,62 @@ public class PrinterTests
         Assert.Empty(tracker.Consume("Not SD printing", t));
         Assert.True(tracker.Printing);
 
-        var finished = Assert.Single(tracker.Disconnected(t));
+        // A lost connection is not the end of the print – only when the printer stays away
+        tracker.ConnectionLost(t);
+        Assert.Empty(tracker.CheckLost(t.AddSeconds(30), TimeSpan.FromSeconds(60)));
+        Assert.True(tracker.Printing);
+        var finished = Assert.Single(tracker.CheckLost(t.AddSeconds(61), TimeSpan.FromSeconds(60)));
         Assert.Equal("printer disconnected", finished.Detail);
-        Assert.Empty(tracker.Disconnected(t));
+        Assert.Empty(tracker.CheckLost(t.AddSeconds(120), TimeSpan.FromSeconds(60)));
+    }
+
+    [Fact]
+    public void Reconnect_during_a_print_continues_it()
+    {
+        // Recorded on 2026-11-23: write timeouts during mesh probing dropped the connection every minute
+        var tracker = new PrusaStateTracker();
+        var t = DateTime.UtcNow;
+        tracker.Consume("File opened: /usb/BATTER~2.BGC Size:8375974", t);
+
+        tracker.ConnectionLost(t);
+        tracker.Connected(expectStatus: true);
+        Assert.Empty(tracker.Consume("ok", t));
+        Assert.Empty(tracker.Consume("SD printing byte 543/8375974", t)); // still printing: no new start
+        Assert.True(tracker.Printing);
+        Assert.Empty(tracker.CheckLost(t.AddMinutes(5), TimeSpan.FromSeconds(60)));
+
+        // Later "Not SD printing" (pause) does not end it …
+        Assert.Empty(tracker.Consume("Not SD printing", t));
+        Assert.True(tracker.Printing);
+
+        // … but right after a reconnect it does (printer restarted / print ended meanwhile)
+        tracker.ConnectionLost(t);
+        tracker.Connected(expectStatus: true);
+        var finished = Assert.Single(tracker.Consume("Not SD printing", t));
+        Assert.Equal(PrinterEventKind.PrintFinished, finished.Kind);
+    }
+
+    [Fact]
+    public void Queries_wait_for_the_answer_and_while_the_printer_is_busy()
+    {
+        var tracker = new PrusaStateTracker();
+        var t = DateTime.UtcNow;
+        Assert.True(tracker.CanQuery(t));
+
+        tracker.QuerySent(t);
+        Assert.False(tracker.CanQuery(t.AddSeconds(10)));
+        tracker.Consume("ok", t);
+        Assert.True(tracker.CanQuery(t.AddSeconds(10)));
+
+        // Blocking command: keepalive every 2 s, the printer does not read the input
+        tracker.Consume("echo:busy: processing", t.AddSeconds(20));
+        Assert.False(tracker.CanQuery(t.AddSeconds(22)));
+        Assert.True(tracker.CanQuery(t.AddSeconds(26)));
+
+        // A lost "ok" blocks queries only for a while
+        tracker.QuerySent(t.AddSeconds(30));
+        Assert.False(tracker.CanQuery(t.AddSeconds(60)));
+        Assert.True(tracker.CanQuery(t.AddSeconds(91)));
     }
 
     [Fact]
