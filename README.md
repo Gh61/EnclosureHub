@@ -165,8 +165,8 @@ The fast presets are limited by the software JPEG encoder (roughly 35 fps at 720
   maximum duration with a live estimate of frames, disk space and video length next to the current free disk
   space; video frame rate and encoder; ffmpeg status with a one-click *Install*) and *Integrations* (Home
   Assistant camera mode, image interval and hub address; dashboard on/off). Options that need the printer
-  appear under a *Printer connection* heading on the Camera and Timelapse tabs once it is linked. The Settings
-  link opens the tab you used last.
+  appear under a *Printer connection* heading on the Camera and Timelapse tabs once it is linked. The sidebar's
+  Settings link opens the tab you used last; the Camera page links straight to the Camera tab.
   Changes are written to `appsettings.Local.json` and applied live (the camera process restarts within a few seconds).
 - **System** – version, host, uptime, memory and a *Restart service* button.
 

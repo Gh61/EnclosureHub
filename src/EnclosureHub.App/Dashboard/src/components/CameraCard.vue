@@ -63,7 +63,7 @@ function toggle(on: boolean) {
       />
       <a :href="snapshotUrl" target="_blank" rel="noopener">Snapshot URL</a>
       <a :href="streamUrl" target="_blank" rel="noopener">Stream URL</a>
-      <a href="#settings">Settings</a>
+      <a href="#settings/camera">Settings</a>
     </div>
   </div>
 </template>
