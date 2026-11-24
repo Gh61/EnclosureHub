@@ -16,9 +16,9 @@
          Publish with: dotnet publish src/EnclosureHub.App -c Release -r linux-arm self-contained -->
 
     <!-- The web dashboard (Vue + TypeScript + SCSS) lives in Dashboard/ and is built with Vite into wwwroot/.
-         Its sources and node_modules are not project items; wwwroot is generated (see BuildDashboard). -->
+         node_modules stays out of the project; wwwroot is generated (see BuildDashboard). -->
     <DashboardDir>$(MSBuildProjectDirectory)/Dashboard/</DashboardDir>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Dashboard/**;wwwroot/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Dashboard/node_modules/**;wwwroot/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,6 +38,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Dashboard sources are shown in the IDE as plain files; they are never copied to the output (the Web SDK
+         would otherwise treat package.json & co. as Content). -->
+    <Content Remove="Dashboard/**" />
+    <None Remove="Dashboard/**" />
+    <None Include="Dashboard/**" Exclude="Dashboard/node_modules/**" />
     <DashboardSource Include="Dashboard/src/**;Dashboard/public/**;Dashboard/index.html;Dashboard/package.json;Dashboard/package-lock.json;Dashboard/vite.config.ts;Dashboard/tsconfig.json" />
   </ItemGroup>
 
