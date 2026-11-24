@@ -41,7 +41,14 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
         new("0.5", "1 frame every 2 s"),
         new("1", "1 frame per second"),
         new("2", "2 frames per second"),
+        new("3", "3 frames per second"),
+        new("4", "4 frames per second"),
         new("5", "5 frames per second"),
+        new("6", "6 frames per second"),
+        new("7", "7 frames per second"),
+        new("8", "8 frames per second"),
+        new("9", "9 frames per second"),
+        new("10", "10 frames per second"),
         new("15", "15 frames per second"),
         new("30", "30 frames per second"),
         new("60", "60 frames per second"),
@@ -97,7 +104,8 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
                     "1640 × 1232 shows the whole sensor area; 1920 × 1080 is a crop of the centre.",
                     WithCurrent(Resolutions, Resolution(o))),
                 new("framerate", "Frame rate", SettingFieldType.Choice,
-                    "Higher rates cost CPU on the Pi and bandwidth for the stream.",
+                    "Higher rates cost CPU on the Pi (about 15 % per frame per second at 1640 × 1232 on a Pi 2) and bandwidth for the stream. "
+                    + "The Status page shows the rate the Pi really achieves.",
                     WithCurrent(Framerates, Fmt(o.Framerate))),
                 new("quality", "JPEG quality", SettingFieldType.Number,
                     "1–100. 85 is a good balance; 70 roughly halves the image size.", Min: 1, Max: 100, Step: 1),
@@ -114,8 +122,8 @@ public sealed class RpicamCameraSettingsSection : ISettingsSection
                     "Uses the linked printer; works while it is connected and printing."));
                 fields.Add(new("captureOnLayer", "New frame on every layer change", SettingFieldType.Toggle,
                     "Provides a fresh picture right after the printer starts a new layer, besides the regular frame rate; the timelapse then "
-                    + "waits for exactly this picture. At 1 fps and faster it is simply the next frame (within a second). Below 1 fps the camera "
-                    + "captures at 1 fps (CPU like the Monitoring preset) and keeps only the regular frames and one per layer.",
+                    + "waits for exactly this picture instead of taking the latest one. It is the next frame the camera captures, so it comes "
+                    + "within 1/frame rate seconds; the timelapse can raise the capture rate while it records (Timelapse → Capture rate while recording).",
                     Tag: SettingTags.Printer));
             }
 

@@ -33,7 +33,7 @@ Everything the controller exposes is an `Entity`:
 | Class | Kind | State | Commands |
 |---|---|---|---|
 | `CameraEntity` | Camera | latest frame via `ICameraFrameSource` | – |
-| `SensorEntity` | Sensor | `double? Value` + unit, device/state class | – |
+| `SensorEntity` | Sensor | `double? Value` + unit, device/state class; optional `Live` reading (1 s sample, polled, no events) | – |
 | `BinarySensorEntity` | BinarySensor | `bool? IsOn` + device class | – |
 | `SwitchEntity` (abstract) | Switch | `bool? IsOn` | `SetAsync(bool)` |
 | `LightEntity` (abstract) | Light | `LightState` (on, brightness, color temp, RGB) | `SetAsync(LightCommand)` |
@@ -200,8 +200,14 @@ stream is attached only while the Camera page is visible to spare the Pi.
 
 - Workstation GC, no concurrent GC, invariant globalization (see `EnclosureHub.App.csproj`).
 - Camera runs one long-lived `rpicam-vid` at 1 fps, software MJPEG – about 15 % CPU; cost grows linearly with fps.
-- Layer frames below 1 fps: rpicam-vid runs at `OnDemandFramerate` (1) and the service publishes only the regular
-  and the layer frames ("selective mode"). rpicam-vid `--signal` pause was measured first and rejected: it keeps
-  encoding while paused (70 % CPU at 5 fps).
+- Capture-rate holds: a consumer (the timelapse during a layer-mode recording) calls
+  `ICameraFrameSource.HoldCaptureRate(fps)`; rpicam-vid then runs at the highest held rate and the service publishes
+  only the regular frames (configured rate) plus the first frame after each layer change ("selective mode").
+  rpicam-vid `--signal` pause was measured and rejected: it keeps capturing and encoding while paused (70 % CPU at
+  5 fps), i.e. same cost, same precision.
+- Measured capture timing (`LastFrameInterval`, `CapturedFramesPerSecond` over the last 16 captured frames) is
+  exposed in the camera entity state (`frameIntervalMs`, `capturedFps`); CPU load is sampled every second from
+  `/proc/stat` (`cpu_load`, `Live`). The dashboard polls entities with live readings once a second while the
+  Status page is open and draws 120-sample sparklines in the browser – nothing is stored on the server.
 - Timelapse capture is a file write every interval; rendering is CPU-heavy but runs at idle priority.
 - Publish self-contained with ReadyToRun to cut startup time; never build on the Pi.

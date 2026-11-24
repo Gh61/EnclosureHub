@@ -124,6 +124,10 @@ h2 {
 
 .value { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* Inline sparkline of live readings (Status page): one thin white line, grows from the right */
+.spark { flex: none; display: block; overflow: visible; }
+.spark polyline { fill: none; stroke: var(--fg); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

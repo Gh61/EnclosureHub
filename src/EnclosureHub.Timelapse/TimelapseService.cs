@@ -59,6 +59,10 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
     private Recording? _current;
     private long? _videoBytesPerFrame;
 
+    // Held while a layer-mode recording runs with CaptureFps > 0 (see TimelapseOptions.CaptureFps)
+    private IDisposable? _captureHold;
+    private double _heldFps;
+
     public TimelapseService(
         IOptionsMonitor<TimelapseOptions> options,
         IEntityRegistry registry,
@@ -183,6 +187,7 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
             }
 
             _entities.Switch.Reflect(false);
+            UpdateCaptureHold(_options.CurrentValue, TimelapseTrigger.Interval);
             if (recording == null)
                 return;
 
@@ -233,7 +238,10 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
             return;
         }
 
-        switch (CurrentTrigger(options))
+        var trigger = CurrentTrigger(options);
+        UpdateCaptureHold(options, trigger);
+
+        switch (trigger)
         {
             case TimelapseTrigger.Layers:
                 return;
@@ -290,17 +298,45 @@ public sealed partial class TimelapseService : BackgroundService, ITimelapseServ
             await SaveFrameAsync(recording, frame, DateTime.UtcNow, layer.Layer, options, cancellationToken);
     }
 
-    /// <summary>Layers decide while the printer is linked, connected and printing and layer frames are on; otherwise the timer.</summary>
+    /// <summary>
+    /// Layers decide while the printer is linked and printing and layer frames are on; otherwise the timer. "Printing"
+    /// survives a short connection loss (the printer module's grace period), so a USB hiccup does not flip the mode.
+    /// </summary>
     private TimelapseTrigger CurrentTrigger(TimelapseOptions options)
     {
         if (!options.LayerFrames || _printer is not { IsLinked: true })
             return TimelapseTrigger.Interval;
 
-        var status = _printer.GetStatus();
-        if (!status.Connected || !status.Printing)
+        if (!_printer.GetStatus().Printing)
             return TimelapseTrigger.Interval;
 
         return options.TimerFramesBetweenLayers ? TimelapseTrigger.LayersAndInterval : TimelapseTrigger.Layers;
+    }
+
+    /// <summary>Holds the camera at CaptureFps during a layer-mode recording; released otherwise (also on stop).</summary>
+    private void UpdateCaptureHold(TimelapseOptions options, TimelapseTrigger trigger)
+    {
+        bool wanted;
+        lock (_gate)
+            wanted = _current != null && trigger != TimelapseTrigger.Interval && options.CaptureFps > 0;
+
+        double fps = wanted ? options.CaptureFps : 0;
+        if (_captureHold != null && (!wanted || Math.Abs(fps - _heldFps) > 0.001))
+        {
+            _captureHold.Dispose();
+            _captureHold = null;
+            _heldFps = 0;
+        }
+
+        if (wanted && _captureHold == null && _registry.Find(options.CameraId) is CameraEntity camera)
+        {
+            _captureHold = camera.Source.HoldCaptureRate(fps);
+            if (_captureHold != null)
+            {
+                _heldFps = fps;
+                _logger.LogInformation("Timelapse asks the camera for {Fps} fps while recording", fps);
+            }
+        }
     }
 
     private static TimeSpan Interval(TimelapseOptions options) => TimeSpan.FromSeconds(Math.Max(1, options.IntervalSeconds));

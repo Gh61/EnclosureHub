@@ -26,6 +26,14 @@ public sealed class TimelapseSettingsSection : ISettingsSection
         new(TimelapseOptions.SoftwareEncoder, "Software (libx264)"),
     ];
 
+    private static readonly SettingChoice[] CaptureRates =
+    [
+        new("0", "Camera's frame rate"),
+        .. Enumerable.Range(1, 10).Select(f => new SettingChoice(f.ToString(CultureInfo.InvariantCulture), f + " fps")),
+        new("15", "15 fps"),
+        new("30", "30 fps"),
+    ];
+
     private readonly IOptionsMonitor<TimelapseOptions> _options;
     private readonly ISettingsStore _store;
     private readonly string _configPath;
@@ -85,6 +93,12 @@ public sealed class TimelapseSettingsSection : ISettingsSection
                     new("layerFrames", "Frame on every new layer", SettingFieldType.Toggle,
                         "Saves a frame when the printer starts a new layer instead of by the snapshot interval: the object grows evenly in the video.",
                         Tag: SettingTags.Printer),
+                    new("captureFps", "Capture rate while recording", SettingFieldType.Choice,
+                        "While a layer-mode recording runs, the camera captures at least this fast, so the picture of a new layer is taken within "
+                        + "1/rate seconds of the layer change; only the regular frames and the layer frames are kept. Precision costs CPU: about "
+                        + "15 % per fps on a Pi 2 at 1640 × 1232 (rpicam-vid's pause mode costs the same, so it is not offered).",
+                        WithCurrent(CaptureRates, Fmt((int)Math.Round(o.CaptureFps))),
+                        Tag: SettingTags.Printer),
                     new("timerBetweenLayers", "Also by the interval between layers", SettingFieldType.Toggle,
                         "When a layer takes longer than the snapshot interval, a frame is saved by the timer as well (big, slow layers).",
                         Tag: SettingTags.Printer),
@@ -114,6 +128,7 @@ public sealed class TimelapseSettingsSection : ISettingsSection
             ["encoder"] = o.Encoder,
             ["turnCameraOn"] = o.TurnCameraOn,
             ["layerFrames"] = o.LayerFrames,
+            ["captureFps"] = Fmt((int)Math.Round(o.CaptureFps)),
             ["timerBetweenLayers"] = o.TimerFramesBetweenLayers,
             ["layerMinInterval"] = o.LayerMinInterval,
             ["followPrinter"] = o.FollowPrinter,
@@ -147,6 +162,9 @@ public sealed class TimelapseSettingsSection : ISettingsSection
         // Printer options keep their values while the printer is unlinked; they are only sent while it is linked
         if (values.TryGetValue("layerFrames", out var layerText))
             changes[Key("LayerFrames")] = ParseBool(layerText, "Frame on every new layer");
+
+        if (values.TryGetValue("captureFps", out var captureText))
+            changes[Key("CaptureFps")] = (int)Math.Round(ParseNumber(captureText, 0, 120, "Capture rate must be between 0 (camera's rate) and 120 fps."));
 
         if (values.TryGetValue("timerBetweenLayers", out var timerText))
             changes[Key("TimerFramesBetweenLayers")] = ParseBool(timerText, "Also by the interval between layers");

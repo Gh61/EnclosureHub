@@ -19,6 +19,12 @@ public sealed class SensorEntity : Entity
     /// <summary>Home Assistant state class, e.g. "measurement".</summary>
     public string? StateClass { get; init; }
 
+    /// <summary>
+    /// Optional instantaneous reading behind <see cref="Value"/> (e.g. a 1 s sample while the value is a 30 s average
+    /// published to Home Assistant). Read on demand by displays that poll; never raises <see cref="Entity.StateChanged"/>.
+    /// </summary>
+    public Func<double?>? Live { get; init; }
+
     public double? Value { get; private set; }
 
     public void SetValue(double? value)
@@ -30,5 +36,7 @@ public sealed class SensorEntity : Entity
         NotifyStateChanged();
     }
 
-    public override object GetState() => new { value = Value, unit = Unit };
+    public override object GetState() => Live == null
+        ? new { value = Value, unit = Unit }
+        : new { value = Value, unit = Unit, live = Live() };
 }

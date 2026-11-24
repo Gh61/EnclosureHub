@@ -110,11 +110,20 @@ public class RpicamCameraSettingsSectionTests
     }
 
     [Fact]
-    public void Selective_mode_captures_at_the_on_demand_rate()
+    public void Held_capture_rate_replaces_the_configured_frame_rate()
     {
         var options = new RpicamCameraOptions { Framerate = 0.2 };
-        Assert.Equal("-t 0 -n --codec mjpeg --width 1640 --height 1232 --framerate 1 -q 85 -o -", RpicamCameraService.BuildArguments(options, selective: true));
-        Assert.Contains("--framerate 0.2", RpicamCameraService.BuildArguments(options, selective: false));
+        Assert.Equal("-t 0 -n --codec mjpeg --width 1640 --height 1232 --framerate 5 -q 85 -o -", RpicamCameraService.BuildArguments(options, 5));
+        Assert.Contains("--framerate 0.2", RpicamCameraService.BuildArguments(options));
+    }
+
+    [Fact]
+    public void Frame_rate_choices_cover_1_to_10_fps()
+    {
+        var section = new RpicamCameraSettingsSection(new Monitor(new RpicamCameraOptions()), new FakeStore(), "Modules:Camera");
+        var values = section.Fields.Single(f => f.Key == "framerate").Choices!.Select(c => c.Value).ToList();
+        foreach (int fps in Enumerable.Range(1, 10))
+            Assert.Contains(fps.ToString(), values);
     }
 
     [Fact]

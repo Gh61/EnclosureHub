@@ -53,10 +53,16 @@
   const formatState = e => {
     const s = e.state || {};
     switch (e.kind) {
-      case 'sensor': return s.value == null ? '—' : `${s.value}${s.unit ? ' ' + s.unit : ''}`;
+      case 'sensor': {
+        // Live reading (1 s sample) when the sensor has one; the entity value is the slower average sent to HA
+        const v = s.live != null ? s.live : s.value;
+        return v == null ? '—' : `${v}${s.unit ? ' ' + s.unit : ''}`;
+      }
       case 'binarySensor':
       case 'switch': return s.isOn == null ? 'Unknown' : (s.isOn ? 'On' : 'Off');
-      case 'camera': return s.hasFrame ? `Live · frame ${s.frameAgeSeconds}s ago` : 'No image';
+      case 'camera': return s.hasFrame
+        ? `Live · frame ${s.frameAgeSeconds} s ago` + (s.capturedFps != null ? ` · ${s.capturedFps} fps` : '')
+        : 'No image';
       case 'light': return s.isOn ? `On · ${Math.round((s.brightness ?? 255) / 2.55)} %` : 'Off';
       case 'fan': return s.isOn ? `On · ${s.percentage} %` : 'Off';
       default: return JSON.stringify(s);
@@ -92,6 +98,7 @@
       const e = entities[id];
       if (!e) continue;
       const control = el('div', { class: 'control' }, [
+        liveSamples[id] ? sparkline(liveSamples[id], liveUnit(e)) : null,
         el('span', { class: 'dot ' + dotClass(e) }),
         el('span', { class: 'value', text: formatState(e) }),
       ]);
@@ -105,11 +112,62 @@
       list.append(el('div', { class: 'row' }, [
         el('div', {}, [
           el('div', { class: 'label', text: e.name }),
-          el('div', { class: 'sub', text: `${kindLabel[e.kind] || e.kind} · ${e.id}${e.isDiagnostic ? ' · diagnostic' : ''}` }),
+          el('div', { class: 'sub', text: `${kindLabel[e.kind] || e.kind} · ${e.id}${e.isDiagnostic ? ' · diagnostic' : ''}` + liveNote(e) }),
         ]),
         control,
       ]));
     }
+  }
+
+  // ----------------------------------------------------- live readings
+
+  // 1 s samples collected while the Status page is open (not stored on the server): sensors with a "live"
+  // value (CPU load) and cameras (time between captured frames). Newest last; 120 samples = 120 px wide graph.
+  const liveSamples = {};
+  const LiveSampleCount = 120;
+
+  const hasLive = e => e.kind === 'camera' || (e.kind === 'sensor' && e.state && e.state.live !== undefined);
+  const liveValue = e => e.kind === 'camera' ? (e.state && e.state.frameIntervalMs) : (e.state && e.state.live);
+  const liveUnit = e => e.kind === 'camera' ? 'ms' : (e.state && e.state.unit) || '';
+
+  const liveNote = e => {
+    const s = e.state || {};
+    if (e.kind === 'sensor' && s.live !== undefined && s.value != null) return ` · ${s.value}${s.unit ? ' ' + s.unit : ''} average sent to Home Assistant`;
+    if (e.kind === 'camera' && s.frameIntervalMs != null) return ` · ${s.frameIntervalMs} ms between the last two captured frames`;
+    return '';
+  };
+
+  function recordLive(e) {
+    const v = liveValue(e);
+    if (v == null) return;
+    const list = liveSamples[e.id] || (liveSamples[e.id] = []);
+    list.push(v);
+    if (list.length > LiveSampleCount) list.shift();
+  }
+
+  // Inline SVG sparkline: one white 1.5 px line, baseline at 0, no axes (the value next to it is the label)
+  function sparkline(values, unit, width = 120, height = 40) {
+    const max = Math.max(1e-9, ...values);
+    const pad = 2;
+    const points = values.map((v, i) => {
+      const x = values.length > 1 ? pad + (i / (LiveSampleCount - 1)) * (width - 2 * pad) : width - pad;
+      const y = height - pad - (v / max) * (height - 2 * pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    // Right-aligned: the newest sample sits at the right edge, the graph grows leftwards
+    const shift = (width - 2 * pad) * (1 - Math.max(0, values.length - 1) / (LiveSampleCount - 1));
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'spark');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `Last ${values.length} s · now ${values[values.length - 1]} ${unit} · max ${Math.round(max * 10) / 10} ${unit}`;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    line.setAttribute('points', points.join(' '));
+    line.setAttribute('transform', `translate(${shift.toFixed(1)} 0)`);
+    svg.append(title, line);
+    return svg;
   }
 
   const alertError = err => console.error(err);
@@ -957,19 +1015,32 @@
     if (currentPage === 'printer') loadPrinter();
   }, 2000);
 
-  // Camera entity state (frame age) does not raise change events – refresh it while the camera page is open.
+  // Live readings do not raise change events: on the Status page poll them every second (and graph them);
+  // on the Camera page refresh the camera state (frame age) every 5 s.
+  let liveTick = 0;
   setInterval(async () => {
-    if (currentPage !== 'camera' && currentPage !== 'status') return;
-    for (const id of entityOrder) {
-      const e = entities[id];
-      if (!e || e.kind !== 'camera') continue;
-      try {
-        entities[id] = await api(`/api/entities/${encodeURIComponent(id)}`);
-      } catch { /* ignore */ }
+    liveTick++;
+    if (currentPage === 'status') {
+      for (const id of entityOrder) {
+        const e = entities[id];
+        if (!e || !hasLive(e)) continue;
+        try {
+          entities[id] = await api(`/api/entities/${encodeURIComponent(id)}`);
+          recordLive(entities[id]);
+        } catch { /* ignore */ }
+      }
+      renderEntities();
+    } else if (currentPage === 'camera' && liveTick % 5 === 0) {
+      for (const id of entityOrder) {
+        const e = entities[id];
+        if (!e || e.kind !== 'camera') continue;
+        try {
+          entities[id] = await api(`/api/entities/${encodeURIComponent(id)}`);
+        } catch { /* ignore */ }
+      }
+      renderCameras();
     }
-    renderEntities();
-    renderCameras();
-  }, 5000);
+  }, 1000);
 
   // ------------------------------------------------------------------ init
 

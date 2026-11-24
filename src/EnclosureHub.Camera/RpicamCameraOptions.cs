@@ -38,13 +38,9 @@ public sealed class RpicamCameraOptions
 
     /// <summary>
     /// With a linked printer: the first frame after every layer change is published as a layer frame, besides the
-    /// regular frame rate. Below <see cref="OnDemandFramerate"/> rpicam-vid then runs at that rate and the service keeps
-    /// only the regular and the layer frames (selective mode).
+    /// regular frame rate (also implied while the timelapse holds a higher capture rate during a recording).
     /// </summary>
     public bool CaptureOnLayerChange { get; set; }
-
-    /// <summary>Capture rate in selective mode; a layer frame arrives within 1/this seconds. Each fps costs about 15 % CPU on a Pi 2 at 1640×1232.</summary>
-    public double OnDemandFramerate { get; set; } = 1;
 
     /// <summary>Delay before restarting rpicam-vid after it exits.</summary>
     public int RestartDelaySeconds { get; set; } = 5;

@@ -41,6 +41,9 @@ public sealed class CameraEntity : Entity
             hasFrame = frame != null,
             lastFrameUtc = frame?.TimestampUtc,
             frameAgeSeconds = frame == null ? (double?)null : Math.Round((DateTime.UtcNow - frame.TimestampUtc).TotalSeconds, 1),
+            // What the camera really captures (independent of the configured rate); for displays
+            frameIntervalMs = Source.LastFrameInterval is { } interval ? Math.Round(interval.TotalMilliseconds) : (double?)null,
+            capturedFps = Source.CapturedFramesPerSecond is { } fps ? Math.Round(fps, 1) : (double?)null,
         };
     }
 }

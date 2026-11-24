@@ -14,10 +14,12 @@ namespace EnclosureHub.Camera;
 /// the latest frame in memory. A long-lived process keeps exposure and white balance
 /// settled (no warm-up per frame). Restarts the process when it exits or when the
 /// camera settings change; stops it while <see cref="RpicamCameraOptions.Active"/> is false.
-/// With <see cref="RpicamCameraOptions.CaptureOnLayerChange"/> and a linked printer, the first frame after every layer
-/// change is a "layer frame" consumers can wait for. Below <see cref="RpicamCameraOptions.OnDemandFramerate"/> rpicam-vid
-/// runs at that rate and only the regular frames (configured rate) and the layer frames are published (selective mode).
-/// rpicam-vid's own pause (--signal) does not help: it keeps encoding while paused (measured 70 % CPU at 5 fps on a Pi 2).
+/// With a linked printer, the first frame after every layer change is a "layer frame" consumers can wait for –
+/// when <see cref="RpicamCameraOptions.CaptureOnLayerChange"/> is on or while a consumer holds a capture rate
+/// (<see cref="HoldCaptureRate"/>, the timelapse during a layer-mode recording). A held rate above the configured one
+/// makes rpicam-vid capture that fast while only the regular frames (configured rate) and the layer frames are
+/// published ("selective mode"). rpicam-vid's own pause (--signal) is no alternative: it keeps capturing and encoding
+/// while paused (measured 70 % CPU at 5 fps on a Pi 2), so it costs the same and is no more precise than this.
 /// </summary>
 public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 {
@@ -31,6 +33,15 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     private long _selectivePeriodTicks;
     private long _nextPublishTicks;
     private int _layerRequested;
+
+    // Capture-rate holds (timelapse): rpicam-vid captures at the highest held rate, at least the configured one
+    private readonly List<CaptureHold> _holds = [];
+
+    // Measured capture timing: ticks of the last few captured frames (ring), independent of what is published
+    private const int TimingWindow = 16;
+    private readonly long[] _captureTicks = new long[TimingWindow];
+    private int _captureCount;
+    private long _lastIntervalTicks;
 
     private CameraFrame? _latestFrame;
     private TaskCompletionSource<CameraFrame> _nextFrame = NewFrameSource();
@@ -77,8 +88,103 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     public Task<CameraFrame> WaitForNextFrameAsync(CancellationToken cancellationToken)
         => Volatile.Read(ref _nextFrame).Task.WaitAsync(cancellationToken);
 
-    /// <summary>The first frame after every layer change is published (camera setting, printer linked).</summary>
-    public bool CapturesOnPrinterLayer => _options.CurrentValue.CaptureOnLayerChange && _printer is { IsLinked: true };
+    /// <summary>The first frame after every layer change is published: camera setting or a held capture rate, printer linked.</summary>
+    public bool CapturesOnPrinterLayer => _printer is { IsLinked: true } && (_options.CurrentValue.CaptureOnLayerChange || HasHolds);
+
+    public TimeSpan? LastFrameInterval
+    {
+        get
+        {
+            long ticks = Volatile.Read(ref _lastIntervalTicks);
+            return ticks > 0 ? TimeSpan.FromTicks(ticks) : null;
+        }
+    }
+
+    public double? CapturedFramesPerSecond
+    {
+        get
+        {
+            lock (_captureTicks)
+            {
+                if (_captureCount < 2)
+                    return null;
+
+                int count = Math.Min(_captureCount, TimingWindow);
+                long newest = _captureTicks[(_captureCount - 1) % TimingWindow];
+                long oldest = _captureTicks[(_captureCount - count) % TimingWindow];
+                return newest > oldest ? (count - 1) / TimeSpan.FromTicks(newest - oldest).TotalSeconds : null;
+            }
+        }
+    }
+
+    private bool HasHolds
+    {
+        get
+        {
+            lock (_holds)
+                return _holds.Count > 0;
+        }
+    }
+
+    public IDisposable? HoldCaptureRate(double framesPerSecond)
+    {
+        if (framesPerSecond <= 0)
+            return null;
+
+        var hold = new CaptureHold(this, Math.Min(framesPerSecond, 120));
+        lock (_holds)
+            _holds.Add(hold);
+
+        ApplyCaptureRate();
+        return hold;
+    }
+
+    private void ReleaseHold(CaptureHold hold)
+    {
+        lock (_holds)
+            _holds.Remove(hold);
+
+        ApplyCaptureRate();
+    }
+
+    /// <summary>Highest held rate, at least the configured one.</summary>
+    private double CaptureRate(RpicamCameraOptions options)
+    {
+        double rate = options.Framerate;
+        lock (_holds)
+        {
+            foreach (var hold in _holds)
+                rate = Math.Max(rate, hold.FramesPerSecond);
+        }
+
+        return rate;
+    }
+
+    /// <summary>A hold came or went: restart rpicam-vid when the capture rate changed.</summary>
+    private void ApplyCaptureRate()
+    {
+        var options = _options.CurrentValue;
+        string signature = Signature(options, BuildArguments(options, CaptureRate(options)));
+        if (signature == _activeSignature)
+            return;
+
+        _activeSignature = signature;
+        _logger.LogInformation("Camera capture rate changed to {Rate} fps, restarting the camera", CaptureRate(options));
+        RestartCapture();
+    }
+
+    private sealed class CaptureHold(RpicamCameraService owner, double framesPerSecond) : IDisposable
+    {
+        private int _disposed;
+
+        public double FramesPerSecond { get; } = framesPerSecond;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                owner.ReleaseHold(this);
+        }
+    }
 
     public override void Dispose()
     {
@@ -95,9 +201,9 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
             Interlocked.Exchange(ref _layerRequested, 1);
     }
 
-    /// <summary>Selective mode: layer frames wanted and the configured rate below the on-demand rate.</summary>
-    private bool Selective(RpicamCameraOptions options)
-        => CapturesOnPrinterLayer && options.Framerate < options.OnDemandFramerate;
+    /// <summary>Selective mode: a held capture rate above the configured one.</summary>
+    private static bool Selective(RpicamCameraOptions options, double captureRate)
+        => captureRate > options.Framerate + 0.001;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -110,10 +216,10 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 
             // Read the options after publishing the cycle so a change arriving in between still interrupts it
             var options = _options.CurrentValue;
-            bool selective = Selective(options);
-            string arguments = BuildArguments(options, selective);
+            double captureRate = CaptureRate(options);
+            string arguments = BuildArguments(options, captureRate);
             _activeSignature = Signature(options, arguments);
-            StartSelective(options, selective);
+            StartSelective(options, captureRate);
 
             try
             {
@@ -164,7 +270,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 
     private void OnOptionsChanged(RpicamCameraOptions options)
     {
-        string signature = Signature(options, BuildArguments(options, Selective(options)));
+        string signature = Signature(options, BuildArguments(options, CaptureRate(options)));
         if (signature == _activeSignature)
             return; // e.g. another section was saved, or the reload fired twice – nothing relevant changed
 
@@ -190,10 +296,10 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         => options.Active ? options.Executable + " " + arguments : "off";
 
     /// <summary>Builds the rpicam-vid command line for the given options.</summary>
-    public static string BuildArguments(RpicamCameraOptions options) => BuildArguments(options, selective: false);
+    public static string BuildArguments(RpicamCameraOptions options) => BuildArguments(options, options.Framerate);
 
-    /// <summary>In selective mode the sensor runs at <see cref="RpicamCameraOptions.OnDemandFramerate"/>; the service keeps the configured rate.</summary>
-    public static string BuildArguments(RpicamCameraOptions options, bool selective)
+    /// <summary>With a held capture rate above the configured one the sensor runs at <paramref name="captureRate"/>; the service keeps the configured rate.</summary>
+    public static string BuildArguments(RpicamCameraOptions options, double captureRate)
     {
         var parts = new List<string>
         {
@@ -202,7 +308,7 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
             "--codec mjpeg",
             "--width " + options.Width.ToString(CultureInfo.InvariantCulture),
             "--height " + options.Height.ToString(CultureInfo.InvariantCulture),
-            "--framerate " + (selective ? options.OnDemandFramerate : options.Framerate).ToString(CultureInfo.InvariantCulture),
+            "--framerate " + captureRate.ToString(CultureInfo.InvariantCulture),
             "-q " + options.Quality.ToString(CultureInfo.InvariantCulture),
         };
 
@@ -316,14 +422,6 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
                     continue;
                 }
 
-                // The printer link may change without a camera settings change (its options reload separately)
-                if (Selective(options) != _selective)
-                {
-                    _logger.LogInformation("Printer link or layer capture changed, restarting the camera");
-                    _selective = !_selective; // no repeat until the new cycle sets it
-                    RestartCapture();
-                }
-
                 var now = DateTime.UtcNow;
                 var frame = LatestFrame;
                 bool fresh = frame != null && (now - frame.TimestampUtc).TotalSeconds < options.StaleAfterSeconds;
@@ -340,6 +438,9 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
     private void ClearFrame()
     {
         Volatile.Write(ref _latestFrame, null);
+        Volatile.Write(ref _lastIntervalTicks, 0);
+        lock (_captureTicks)
+            _captureCount = 0;
         SetRunning(false);
     }
 
@@ -350,15 +451,31 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
         Camera.SetAvailable(running);
     }
 
-    private void StartSelective(RpicamCameraOptions options, bool selective)
+    private void StartSelective(RpicamCameraOptions options, double captureRate)
     {
         Interlocked.Exchange(ref _layerRequested, 0);
         Volatile.Write(ref _selectivePeriodTicks, TimeSpan.FromSeconds(1 / Math.Max(0.01, options.Framerate)).Ticks);
         Volatile.Write(ref _nextPublishTicks, 0);
-        _selective = selective;
-        if (selective)
-            _logger.LogInformation("Camera runs at {Rate} fps and keeps a frame every {Period:0.#} s plus one per layer change",
-                options.OnDemandFramerate, 1 / Math.Max(0.01, options.Framerate));
+        Volatile.Write(ref _lastIntervalTicks, 0);
+        lock (_captureTicks)
+            _captureCount = 0;
+
+        _selective = Selective(options, captureRate);
+        if (_selective)
+            _logger.LogInformation("Camera captures at {Rate} fps and keeps a frame every {Period:0.#} s plus one per layer change",
+                captureRate, 1 / Math.Max(0.01, options.Framerate));
+    }
+
+    /// <summary>Records a captured frame for the measured interval and rate.</summary>
+    private void RecordCapture(long nowTicks)
+    {
+        lock (_captureTicks)
+        {
+            if (_captureCount > 0)
+                Volatile.Write(ref _lastIntervalTicks, nowTicks - _captureTicks[(_captureCount - 1) % TimingWindow]);
+            _captureTicks[_captureCount % TimingWindow] = nowTicks;
+            _captureCount++;
+        }
     }
 
     /// <summary>Selective mode: true for a regular frame that is due or the first frame after a layer change.</summary>
@@ -379,10 +496,13 @@ public sealed class RpicamCameraService : BackgroundService, ICameraFrameSource
 
     private void PublishFrame(byte[] jpeg)
     {
-        if (_selective && !ShouldPublish(DateTime.UtcNow.Ticks))
+        long now = DateTime.UtcNow.Ticks;
+        RecordCapture(now);
+
+        if (_selective && !ShouldPublish(now))
             return;
 
-        var frame = new CameraFrame(jpeg, DateTime.UtcNow);
+        var frame = new CameraFrame(jpeg, new DateTime(now, DateTimeKind.Utc));
         Volatile.Write(ref _latestFrame, frame);
 
         var waiting = Interlocked.Exchange(ref _nextFrame, NewFrameSource());

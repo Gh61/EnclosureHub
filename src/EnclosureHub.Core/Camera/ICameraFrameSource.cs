@@ -9,11 +9,24 @@ public interface ICameraFrameSource
     Task<CameraFrame> WaitForNextFrameAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// The camera captures a fresh frame on every printer layer change (camera setting); consumers that react
-    /// to the same layer change should wait for it (<see cref="CameraFrameSourceExtensions.WaitForFrameAfterAsync"/>)
-    /// instead of taking <see cref="LatestFrame"/>.
+    /// The camera publishes the first frame after every printer layer change (camera setting, or a capture-rate
+    /// hold); consumers that react to the same layer change should wait for it
+    /// (<see cref="CameraFrameSourceExtensions.WaitForFrameAfterAsync"/>) instead of taking <see cref="LatestFrame"/>.
     /// </summary>
     bool CapturesOnPrinterLayer => false;
+
+    /// <summary>Time between the last two captured frames (captured, not necessarily published); null before the second frame.</summary>
+    TimeSpan? LastFrameInterval => null;
+
+    /// <summary>Frames the camera really captures per second, measured over the last few frames; null until known.</summary>
+    double? CapturedFramesPerSecond => null;
+
+    /// <summary>
+    /// Asks the camera to capture at least this fast until the returned handle is disposed, so the first frame after a
+    /// printer layer change comes within 1/<paramref name="framesPerSecond"/> s (the camera then publishes that frame
+    /// besides its regular ones – see <see cref="CapturesOnPrinterLayer"/>). Null when the camera cannot do it.
+    /// </summary>
+    IDisposable? HoldCaptureRate(double framesPerSecond) => null;
 }
 
 public static class CameraFrameSourceExtensions

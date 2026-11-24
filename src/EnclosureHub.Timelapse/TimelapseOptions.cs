@@ -31,6 +31,12 @@ public sealed class TimelapseOptions
     /// </summary>
     public bool LayerFrames { get; set; } = true;
 
+    /// <summary>
+    /// In layer mode, ask the camera to capture at least this fast while recording, so the layer frame comes within
+    /// 1/this seconds of the layer change (about 15 % CPU per fps on a Pi 2 at 1640×1232). 0 = the camera's own rate.
+    /// </summary>
+    public double CaptureFps { get; set; }
+
     /// <summary>In layer mode, also save a frame by the timer when a layer takes longer than the interval.</summary>
     public bool TimerFramesBetweenLayers { get; set; }
 

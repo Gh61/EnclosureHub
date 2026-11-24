@@ -398,6 +398,33 @@ public sealed class TimelapseTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_rate_is_held_only_during_a_layer_mode_recording()
+    {
+        var printer = PrintingPrinter();
+        var service = CreateService(out _, new TimelapseOptions { CaptureFps = 5 }, printer);
+        var t0 = DateTime.UtcNow;
+
+        await service.TickAsync(t0, CancellationToken.None); // not recording
+        Assert.Null(_frames.HeldRate);
+
+        await service.StartRecordingAsync(CancellationToken.None);
+        await service.TickAsync(t0.AddSeconds(1), CancellationToken.None);
+        Assert.Equal(5, _frames.HeldRate);
+        Assert.True(_frames.CapturesOnPrinterLayer); // the camera publishes the layer frames while held
+
+        printer.Printing = false; // interval mode: the hold is released
+        await service.TickAsync(t0.AddSeconds(2), CancellationToken.None);
+        Assert.Null(_frames.HeldRate);
+
+        printer.Printing = true;
+        await service.TickAsync(t0.AddSeconds(3), CancellationToken.None);
+        Assert.Equal(5, _frames.HeldRate);
+
+        await service.StopRecordingAsync("test", CancellationToken.None);
+        Assert.Null(_frames.HeldRate);
+    }
+
+    [Fact]
     public void Printer_fields_appear_only_while_the_printer_is_linked()
     {
         var printer = new PrinterTests.FakePrinter();
@@ -406,11 +433,12 @@ public sealed class TimelapseTests : IDisposable
 
         printer.IsLinked = true;
         var keys = section.Fields.Where(f => f.Tag == SettingTags.Printer).Select(f => f.Key);
-        Assert.Equal(["layerFrames", "timerBetweenLayers", "layerMinInterval", "followPrinter"], keys);
+        Assert.Equal(["layerFrames", "captureFps", "timerBetweenLayers", "layerMinInterval", "followPrinter"], keys);
         Assert.Contains(section.Fields, f => f.Type == SettingFieldType.Heading);
 
         var values = section.GetValues();
         Assert.Equal(true, values["layerFrames"]);
+        Assert.Equal("0", values["captureFps"]);
         Assert.Equal(false, values["timerBetweenLayers"]);
         Assert.Equal(true, values["layerMinInterval"]);
         Assert.Equal(false, values["followPrinter"]);
@@ -426,7 +454,22 @@ public sealed class TimelapseTests : IDisposable
 
         public CameraFrame? LatestFrame { get; private set; }
 
-        public bool CapturesOnPrinterLayer { get; set; }
+        private bool _capturesOnLayer;
+
+        public bool CapturesOnPrinterLayer { get => _capturesOnLayer || HeldRate != null; set => _capturesOnLayer = value; }
+
+        public double? HeldRate { get; private set; }
+
+        public IDisposable? HoldCaptureRate(double framesPerSecond)
+        {
+            HeldRate = framesPerSecond;
+            return new Release(this);
+        }
+
+        private sealed class Release(FakeFrameSource owner) : IDisposable
+        {
+            public void Dispose() => owner.HeldRate = null;
+        }
 
         public void Next(DateTime timestampUtc)
         {

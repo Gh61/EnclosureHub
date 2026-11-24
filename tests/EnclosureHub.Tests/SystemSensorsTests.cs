@@ -16,6 +16,18 @@ public class SystemSensorsTests
     }
 
     [Fact]
+    public void Parses_cpu_line_of_proc_stat()
+    {
+        const string stat = "cpu  2255 34 2290 22625563 6290 127 456 0 0 0\ncpu0 1132 34 1441 11311718 3675 127 438 0 0 0\n";
+        var parsed = SystemSensorsService.ParseCpuStat(stat);
+
+        Assert.NotNull(parsed);
+        Assert.Equal(22625563 + 6290, parsed.Value.Idle);
+        Assert.Equal(2255 + 34 + 2290 + 22625563 + 6290 + 127 + 456 + 0, parsed.Value.Total);
+        Assert.Null(SystemSensorsService.ParseCpuStat("intr 1 2 3\n"));
+    }
+
+    [Fact]
     public void Returns_zero_without_wireless_interface_or_link()
     {
         Assert.Equal(0, SystemSensorsService.ParseWirelessLevel(Header));

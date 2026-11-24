@@ -12,7 +12,11 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
   <img src="docs/screenshots/settings.jpg" alt="Settings page" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/status.jpg" alt="Status page" width="49%">
+  <img src="docs/screenshots/status.jpg" alt="Status page with live CPU load and camera frame-rate graphs" width="49%">
+  <img src="docs/screenshots/printer.jpg" alt="Printer page" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/timelapse.jpg" alt="Timelapse page" width="49%">
   <img src="docs/screenshots/system.jpg" alt="System page" width="49%">
 </p>
 
@@ -44,7 +48,9 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
   Server-Sent Events, settings (applied live and saved on the device), system info and restart.
   Switchable off, optional HTTP Basic authentication.
 - **Local HTTP API + SSE** – the contract for displays and other clients; the dashboard is its reference client.
-- **Controller health** – CPU temperature and Wi-Fi signal strength (dBm, 0 when there is no Wi-Fi link).
+- **Controller health** – CPU temperature, Wi-Fi signal strength (dBm, 0 when there is no Wi-Fi link) and CPU load
+  (30 s average in Home Assistant; 1 s samples with a live graph on the dashboard). The camera row shows the frame
+  rate the Pi really captures – e.g. 1080p60 configured, 18 fps achieved – with a graph of the frame intervals.
 - **Installation** – `deploy` script from your PC, then `sudo enclosurehub --install` creates and starts the systemd service.
 
 ## Not done yet
@@ -148,7 +154,10 @@ The fast presets are limited by the software JPEG encoder (roughly 35 fps at 720
 - **Printer** (shown while the printer is linked) – connection, printer model and firmware, print state with
   file, progress, layer and Z, temperatures; the live communication log (sent / received lines, temperature
   reports hidden on request) and a *Read* button that asks an idle printer who it is (`M115`).
-- **Status** – all entities with live values.
+- **Status** – all entities with live values. CPU load and the camera get a 1-second reading and a small inline
+  graph of the last two minutes (drawn in the browser from values polled while the page is open; nothing is
+  stored on the server): CPU load in %, and for the camera the time between captured frames plus the
+  frame rate actually achieved.
 - **Settings** – in tabs: *Devices* (camera on/off, mode presets, resolution, frame rate, JPEG quality,
   rotation, extra rpicam arguments), *Printer* (link the printer, layer detection, queries, printer entities,
   and an overview of everything the link enables with its state), *Timelapse* (snapshot interval and maximum
@@ -173,10 +182,10 @@ it as a lock against accidental changes rather than strong security.
 |---|---|
 | `Device` | Id, name, manufacturer, model shown in Home Assistant |
 | `Web` | `Dashboard:Enabled`; `Auth:Username`/`Auth:Password` (Basic auth for all endpoints except `/health`) |
-| `Modules:Camera` | `Enabled` (module present), `Active` (camera on/off – the switch), `Width`/`Height`, `Framerate`, `Quality`, `Rotation` (0/180), `ExtraArgs` (e.g. `--hflip --vflip`), `CaptureOnLayerChange` (fresh frame per layer, off), `OnDemandFramerate` (1) |
+| `Modules:Camera` | `Enabled` (module present), `Active` (camera on/off – the switch), `Width`/`Height`, `Framerate` (presets 0.2–90, dashboard offers 1–10 fps individually), `Quality`, `Rotation` (0/180), `ExtraArgs` (e.g. `--hflip --vflip`), `CaptureOnLayerChange` (fresh frame per layer, off) |
 | `Modules:Printer` | `Enabled`, `Linked` (set from the dashboard after the printer answered), `Port` (empty = auto-detect `/dev/serial/by-id/*Prusa*`), `Query` (M27/M155, on), `StatusIntervalSeconds` (10), `TemperatureIntervalSeconds` (5), `LayerDetection` (`ZChange`), `Entities` (on; read at startup), stored `MachineType`/`Firmware`/`Uuid` |
-| `Modules:Timelapse` | `Enabled`, `IntervalSeconds` (30), `MaxDurationHours` (48), `VideoFps` (30), `Encoder` (`h264_v4l2m2m` hardware, default / `libx264`), `Crf`, `TurnCameraOn`, `Directory` (`timelapse` next to the executable), `MinFreeMegabytes` (stop when the disk gets this full), `CameraId`; with a printer: `LayerFrames` (on), `TimerFramesBetweenLayers` (off), `LayerMinInterval` (on), `FollowPrinter` (off) |
-| `Modules:SystemSensors` | `Enabled`, polling interval |
+| `Modules:Timelapse` | `Enabled`, `IntervalSeconds` (30), `MaxDurationHours` (48), `VideoFps` (30), `Encoder` (`h264_v4l2m2m` hardware, default / `libx264`), `Crf`, `TurnCameraOn`, `Directory` (`timelapse` next to the executable), `MinFreeMegabytes` (stop when the disk gets this full), `CameraId`; with a printer: `LayerFrames` (on), `CaptureFps` (0 = camera's rate), `TimerFramesBetweenLayers` (off), `LayerMinInterval` (on), `FollowPrinter` (off) |
+| `Modules:SystemSensors` | `Enabled`, `IntervalSeconds` (30; CPU load is sampled every second and averaged over it) |
 | `Mqtt` | `Enabled`, broker `Host`/`Port`/`Username`/`Password`; `CameraMode` (`Image`/`Link`), `CameraImageIntervalSeconds`, `PublicUrl` |
 
 Any value can also be set via environment variables, e.g. `Mqtt__Password=...`. The dashboard edits the
@@ -217,10 +226,15 @@ What uses the link (all only while the printer is linked; the values are kept wh
   layer. *Also by the interval between layers* (off): long layers get timer frames too. *Start and stop with
   the print* (off – so it does not fight an existing Home Assistant automation).
 - **Camera** – *New frame on every layer change* (off): the first frame after a layer change becomes the layer
-  frame, and the timelapse waits for exactly that picture instead of taking the one in memory. At 1 fps and
-  faster that is simply the next frame (≤ 1 s). Below 1 fps the camera captures at 1 fps (CPU like the
-  Monitoring preset) and keeps only the regular frames plus one per layer. (rpicam-vid's own pause/resume was
-  tried first: it keeps encoding while paused, 70 % CPU at 5 fps on a Pi 2.)
+  frame, and the timelapse waits for exactly that picture instead of taking the one in memory. It is the next
+  frame the camera captures, so it comes within 1/frame-rate seconds of the layer change.
+- **Capture rate while recording** (Timelapse, default *Camera's frame rate*): how precise that layer picture
+  is. While a layer-mode recording runs, the camera captures at least this fast (1–30 fps) and keeps only its
+  regular frames plus one per layer, so the layer picture is taken within 1/rate s of the layer change; the
+  camera returns to its own rate when the recording stops or the print ends. Precision costs CPU: about 15 %
+  per fps at 1640 × 1232 on a Pi 2 (5 fps ≈ 70 %). rpicam-vid's own pause mode (`--signal`) was measured and is
+  not offered: while "paused" it still captures and encodes every frame, so it costs the same CPU and is exactly
+  as precise as capturing at that rate.
 - **Entities** (*Printer entities*, on; after a restart): *Printer connected*, *Printer printing*, *Nozzle
   temperature*, *Bed temperature* (whole degrees), *Printer Z height*, *Printer layer* – for Home Assistant and
   displays, and later for light/fan rules. Turn them off if Home Assistant already gets the printer via PrusaLink.

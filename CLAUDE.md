@@ -46,6 +46,8 @@ logs: `journalctl -u enclosurehub`. Config on the device: `/opt/enclosurehub/app
 - Every new module or user-visible feature is documented in `README.md` (what it does, dashboard, settings/config
   keys, API endpoints, MQTT entities) in the same change – plus `docs/ARCHITECTURE.md` for design and
   `docs/SETUP.md` for installation steps where relevant.
+- Dashboard screenshots in `docs/screenshots/` (JPEG, 1266 px wide, paired rows in the README padded to equal height)
+  are refreshed when a page changes visibly or a new page is added.
 - A new feature of one module must not change the behaviour of others by default (e.g. linking the printer does
   not start recording timelapses); new couplings are opt-in settings.
 - When editing existing code, change only what the task requires – keep formatting and names.
