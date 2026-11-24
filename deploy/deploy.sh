@@ -28,8 +28,9 @@ dotnet publish "$ROOT/src/EnclosureHub.App" \
   -p:PublishReadyToRun=true \
   -o "$ROOT/publish"
 
-# Stop the service if it is installed; make sure the directory exists and belongs to the SSH user
-ssh "$TARGET" "sudo systemctl stop enclosurehub 2>/dev/null; sudo mkdir -p $REMOTE_DIR && sudo chown \"\$USER\" $REMOTE_DIR"
+# Stop the service if it is installed; make sure the directory exists and belongs to the SSH user.
+# The dashboard build has hashed file names: clear wwwroot so no stale assets stay behind.
+ssh "$TARGET" "sudo systemctl stop enclosurehub 2>/dev/null; sudo mkdir -p $REMOTE_DIR && sudo chown \"\$USER\" $REMOTE_DIR && rm -rf $REMOTE_DIR/wwwroot"
 scp -r "$ROOT/publish/." "$TARGET:$REMOTE_DIR/"
 ssh "$TARGET" "chmod +x $REMOTE_DIR/enclosurehub"
 

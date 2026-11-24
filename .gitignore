@@ -13,3 +13,8 @@ appsettings.Local.json
 
 # Timelapse frames and videos when running locally (Modules:Timelapse:Directory)
 src/EnclosureHub.App/timelapse/
+
+# Web dashboard: npm packages and the Vite build output (built by `dotnet build` from Dashboard/)
+src/EnclosureHub.App/Dashboard/node_modules/
+src/EnclosureHub.App/Dashboard/.env.local
+src/EnclosureHub.App/wwwroot/

@@ -9,15 +9,15 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
 
 <p align="center">
   <img src="docs/screenshots/camera.jpg" alt="Camera page" width="49%">
-  <img src="docs/screenshots/settings.jpg" alt="Settings page" width="49%">
+  <img src="docs/screenshots/system.jpg" alt="System page" width="49%">
 </p>
 <p align="center">
   <img src="docs/screenshots/status.jpg" alt="Status page with live CPU load and camera frame-rate graphs" width="49%">
   <img src="docs/screenshots/printer.jpg" alt="Printer page" width="49%">
 </p>
 <p align="center">
+  <img src="docs/screenshots/settings.jpg" alt="Settings page" width="49%">
   <img src="docs/screenshots/timelapse.jpg" alt="Timelapse page" width="49%">
-  <img src="docs/screenshots/system.jpg" alt="System page" width="49%">
 </p>
 
 ## What works today
@@ -44,9 +44,9 @@ appear automatically via MQTT discovery. Lights, fans and a touch display are th
   camera entity as unavailable and a "CAMERA OFF" picture instead of the last frame. Availability (last will), retained states, discovery
   republished when HA restarts. Camera either as an MQTT camera (JPEG pushed every few seconds) or in
   *link* mode (HA fetches snapshots itself; stream URL as an attribute) for fast camera modes.
-- **Web dashboard** – black-and-white single-page UI served by the hub: live camera, entity status via
-  Server-Sent Events, settings (applied live and saved on the device), system info and restart.
-  Switchable off, optional HTTP Basic authentication.
+- **Web dashboard** – black-and-white single-page UI served by the hub (Vue 3 + TypeScript, built with Vite):
+  live camera, entity status via Server-Sent Events with live graphs, settings (applied live and saved on the
+  device), system info and restart. Switchable off, optional HTTP Basic authentication.
 - **Local HTTP API + SSE** – the contract for displays and other clients; the dashboard is its reference client.
 - **Controller health** – CPU temperature, Wi-Fi signal strength (dBm, 0 when there is no Wi-Fi link) and CPU load
   (30 s average in Home Assistant; 1 s samples with a live graph on the dashboard). The camera row shows the frame
@@ -101,7 +101,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | | |
 |---|---|
 | Runtime | [.NET 10](https://dotnet.microsoft.com/), published self-contained for `linux-arm` with ReadyToRun – nothing to install on the Pi |
-| Web | ASP.NET Core minimal APIs, Kestrel, Server-Sent Events, static files; dashboard is plain HTML/CSS/JS (no framework, no build step) |
+| Web | ASP.NET Core minimal APIs, Kestrel, Server-Sent Events, static files; dashboard is [Vue 3](https://vuejs.org/) + TypeScript + SCSS, built by [Vite](https://vite.dev/) into `wwwroot` as part of `dotnet build` |
 | MQTT | [MQTTnet 4.x](https://github.com/dotnet/MQTTnet) with Home Assistant MQTT discovery (`camera`, `image`, `sensor`, `binary_sensor`) |
 | Camera | [`rpicam-apps`](https://www.raspberrypi.com/documentation/computers/camera_software.html) (`rpicam-vid --codec mjpeg`) and a small MJPEG frame splitter |
 | Timelapse | [ffmpeg](https://ffmpeg.org/) (the Pi's `h264_v4l2m2m` hardware encoder, `libx264` as fallback), run at idle priority |
@@ -124,9 +124,9 @@ The fast presets are limited by the software JPEG encoder (roughly 35 fps at 720
 ## Quick start
 
 1. Prepare the Pi and Home Assistant: [docs/SETUP.md](docs/SETUP.md)
-2. Build and deploy from your PC (requires the [.NET 10 SDK](https://dotnet.microsoft.com/download);
-   nothing needs to be installed on the Pi except `rpicam-apps-lite` and, for timelapse videos, `ffmpeg` –
-   the dashboard can install the latter for you):
+2. Build and deploy from your PC (requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) and
+   [Node.js](https://nodejs.org/) 20+ for the dashboard build; nothing needs to be installed on the Pi except
+   `rpicam-apps-lite` and, for timelapse videos, `ffmpeg` – the dashboard can install the latter for you):
 
    ```bash
    ./deploy/deploy.sh pi@192.168.1.50           # Linux/macOS
@@ -154,17 +154,19 @@ The fast presets are limited by the software JPEG encoder (roughly 35 fps at 720
 - **Printer** (shown while the printer is linked) – connection, printer model and firmware, print state with
   file, progress, layer and Z, temperatures; the live communication log (sent / received lines, temperature
   reports hidden on request) and a *Read* button that asks an idle printer who it is (`M115`).
-- **Status** – all entities with live values. CPU load and the camera get a 1-second reading and a small inline
-  graph of the last two minutes (drawn in the browser from values polled while the page is open; nothing is
-  stored on the server): CPU load in %, and for the camera the time between captured frames plus the
-  frame rate actually achieved.
-- **Settings** – in tabs: *Devices* (camera on/off, mode presets, resolution, frame rate, JPEG quality,
-  rotation, extra rpicam arguments), *Printer* (link the printer, layer detection, queries, printer entities,
-  and an overview of everything the link enables with its state), *Timelapse* (snapshot interval and maximum
-  duration with a live estimate of frames, disk space and video length next to the current free disk space;
-  video frame rate and encoder; ffmpeg status with a one-click *Install*) and *Integrations* (Home Assistant
-  camera mode, image interval and hub address; dashboard on/off). Options that need the printer appear under a
-  *Printer connection* heading on the Devices and Timelapse tabs once it is linked.
+- **Status** – all entities with live values, CPU load first. CPU load and the camera get a 1-second reading and
+  a small inline graph of the last two minutes (drawn in the browser from values polled while the page is open;
+  nothing is stored on the server): CPU load in %, and for the camera the frame rate actually achieved
+  (from the time between captured frames) – the graph is scaled to its min and max, labelled on the left, so a
+  wobble between 0.97 and 1.00 fps is visible.
+- **Settings** – in tabs: *Camera* (on/off, mode presets, resolution, frame rate incl. every step from 1 to 10 fps,
+  JPEG quality, rotation, extra rpicam arguments), *Printer* (link the printer, layer detection, queries, printer
+  entities, and an overview of everything the link enables with its state), *Timelapse* (snapshot interval and
+  maximum duration with a live estimate of frames, disk space and video length next to the current free disk
+  space; video frame rate and encoder; ffmpeg status with a one-click *Install*) and *Integrations* (Home
+  Assistant camera mode, image interval and hub address; dashboard on/off). Options that need the printer
+  appear under a *Printer connection* heading on the Camera and Timelapse tabs once it is linked. The Settings
+  link opens the tab you used last.
   Changes are written to `appsettings.Local.json` and applied live (the camera process restarts within a few seconds).
 - **System** – version, host, uptime, memory and a *Restart service* button.
 
@@ -343,13 +345,19 @@ With the default `Device:Id` = `enclosurehub`:
 ## Development
 
 ```bash
-dotnet build
+dotnet build                                 # also builds the dashboard (npm ci + vite build) when its sources changed
 dotnet test
 dotnet run --project src/EnclosureHub.App   # runs on Windows/Linux too; camera just keeps retrying
+cd src/EnclosureHub.App/Dashboard && npm run dev   # dashboard with hot reload; /api is proxied to a running hub
 ```
 
+The dashboard is a Vue 3 + TypeScript + SCSS app in `src/EnclosureHub.App/Dashboard/` (state in `src/stores`,
+pages in `src/pages`, API types in `src/api.ts`). `npm run build` type-checks scripts *and* templates with
+`vue-tsc` and writes `wwwroot/` (generated, not committed). For `npm run dev` against the real device put
+`VITE_PROXY=http://<pi>:8080` into `Dashboard/.env.local`.
+
 Repository layout: `src/EnclosureHub.Core` (entity + settings model), `src/EnclosureHub.Camera`,
-`src/EnclosureHub.Timelapse`, `src/EnclosureHub.Mqtt`, `src/EnclosureHub.App` (host, API, dashboard, installer), `tests/`, `deploy/`, `docs/`.
+`src/EnclosureHub.Printer`, `src/EnclosureHub.App` (host, API, dashboard sources in `Dashboard/`, installer), `tests/`, `deploy/`, `docs/`.
 Large parts of this project were written together with Claude Code.
 
 ## License

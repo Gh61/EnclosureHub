@@ -110,8 +110,8 @@ ssh-copy-id <user>@<pi>
 
 Check that sudo works without a password (default for the Imager-created user): `ssh <user>@<pi> sudo -n true && echo OK`
 
-Build on your PC and copy to `/opt/enclosurehub` on the Pi (requires the .NET 10 SDK; nothing is built
-or installed on the Pi – the app is a self-contained .NET executable):
+Build on your PC and copy to `/opt/enclosurehub` on the Pi (requires the .NET 10 SDK and Node.js 20+ for the
+dashboard; nothing is built or installed on the Pi – the app is a self-contained .NET executable):
 
 ```bash
 ./deploy/deploy.sh <user>@<pi>                 # Linux/macOS

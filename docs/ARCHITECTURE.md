@@ -16,7 +16,7 @@ src/
   EnclosureHub.Printer  Printer module: Prusa (Buddy firmware) over USB serial – print/layer events, entities.
   EnclosureHub.Timelapse Timelapse module: saves a camera entity's latest frame periodically, renders with ffmpeg.
   EnclosureHub.Mqtt     MQTT adapter: Home Assistant discovery, state, images (MQTTnet 4.x).
-  EnclosureHub.App      Host: configuration, DI, HTTP API, web dashboard (wwwroot), Basic auth,
+  EnclosureHub.App      Host: configuration, DI, HTTP API, web dashboard (Dashboard/ → wwwroot), Basic auth,
                         settings store, built-in system sensors module, --install/--uninstall.
 tests/
   EnclosureHub.Tests    Unit tests (xUnit).
@@ -80,7 +80,8 @@ Modules can expose settings for editing at runtime without the UI knowing anythi
   which fires the option monitors.
 
 `GET/PUT /api/settings` exposes all sections; the dashboard renders them generically, grouped into tabs by
-`ISettingsSection.Group` (`SettingsGroups`: Devices, Printer, Timelapse, Integrations; tabs in order of first use).
+`ISettingsSection.Group` (`SettingsGroups`: Camera, Printer, Timelapse, Integrations; tabs in order of first use).
+Tabs are kept small: a section alone on its tab with the tab's name shows no second heading.
 Besides value fields there are `Heading` (a sub-heading; the following fields belong to it) and `Info` (read-only
 text). `SettingField.Tag` marks related fields across sections: fields tagged `printer` exist only while the
 printer is linked (the sections ask `IPrinterConnection.IsLinked`), and the printer section lists them with their
@@ -180,13 +181,17 @@ It never talks to rpicam itself, so the camera runs unchanged.
 - `Web:Auth` (Basic authentication) wraps everything except `/health`; `Web:Dashboard:Enabled` only gates
   the static files. Both are read per request via `IOptionsMonitor`, so a settings save applies immediately.
 
-### Web dashboard (`EnclosureHub.App/wwwroot`)
+### Web dashboard (`EnclosureHub.App/Dashboard` → `wwwroot`)
 
-Static `index.html` + `dashboard.css` + `dashboard.js`, no build step, no framework. It is a client of the
-HTTP API only (entities, SSE, camera endpoints, settings, system) and therefore also the reference
-implementation for other display clients. The look is deliberately minimal: black background, white
-text, outlined white controls, thin separators, a small green/red dot as the only accent. The MJPEG
-stream is attached only while the Camera page is visible to spare the Pi.
+A Vue 3 + TypeScript + SCSS single-page app built by Vite. `dotnet build` runs `npm run build` (MSBuild target
+`BuildDashboard`, incremental on the sources; `npm ci` once) and `publish` adds the generated `wwwroot` to the
+output, so Node.js is needed on the build PC only. `vue-tsc` type-checks the templates against the API types in
+`src/api.ts`. Structure: `src/stores/*.ts` hold reactive state (entities + SSE, timelapse, printer, settings,
+live samples), `src/pages/*.vue` are the six pages (mounted only while shown, so their polling timers and the
+MJPEG stream live only as long as the page), `src/components/` the shared controls (toggle, two-step confirm
+button, sparkline). It is a client of the HTTP API only and therefore also the reference implementation for other
+display clients. The look is deliberately minimal: black background, white text, outlined white controls, thin
+separators, a small green/red dot as the only accent.
 
 ## Adding a module (example: PWM fan)
 

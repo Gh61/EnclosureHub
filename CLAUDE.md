@@ -20,6 +20,7 @@ M1 (camera + system sensors + MQTT discovery + HTTP API/SSE + `--install`) build
 dotnet build
 dotnet test
 dotnet run --project src/EnclosureHub.App
+cd src/EnclosureHub.App/Dashboard && npm run dev    # dashboard with hot reload, proxies /api to VITE_PROXY (default localhost:8080)
 dotnet publish src/EnclosureHub.App -c Release -r linux-arm --self-contained -p:PublishReadyToRun=true -o publish
 ./deploy/deploy.sh <user>@<pi>      # or deploy/deploy.ps1 -Target <user>@<pi> on Windows
 sudo /opt/enclosurehub/enclosurehub --install   # on the Pi, once: creates/enables/starts the systemd unit
@@ -35,8 +36,11 @@ logs: `journalctl -u enclosurehub`. Config on the device: `/opt/enclosurehub/app
 - Keep modules independent: hardware modules only create/update entities; adapters (MQTT, HTTP, web
   dashboard) never reference hardware modules. New hardware = new module + `Add…` extension (honouring
   `Modules:{Name}:Enabled`) + optional `ISettingsSection` for runtime-editable settings.
-- The web dashboard (`wwwroot`) is plain HTML/CSS/JS talking to `/api/*` only; keep it framework-free and
-  in the black/white outlined style. Secrets (MQTT, `Web:Auth`) stay file-only, never editable in the UI.
+- The web dashboard is a Vue 3 + TypeScript + SCSS app in `src/EnclosureHub.App/Dashboard/` (Vite builds it into
+  `wwwroot/`, which is generated and not committed; `dotnet build`/`publish` run `npm run build`, so Node.js is
+  needed on the build PC, never on the Pi). It talks to `/api/*` only, in the black/white outlined style. Keep the
+  type checks green (`npm run build` runs vue-tsc over scripts and templates); state lives in `src/stores/*.ts`,
+  pages in `src/pages/`. Secrets (MQTT, `Web:Auth`) stay file-only, never editable in the UI.
 - Entity IDs are lowercase snake_case and must stay stable (used in MQTT topics and HA unique IDs).
 - Raise `StateChanged` only on real changes (use the entity's setters).
 - Do not set `RuntimeIdentifier` in csproj files (keeps Windows debugging working).

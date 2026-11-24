@@ -51,7 +51,7 @@ public sealed class PrinterSettingsSection : ISettingsSection
             {
                 new("linked", "Printer connection", SettingFieldType.Toggle,
                     "Switching it on asks the printer who it is (M115) and links it only when it answers. Switching it off closes the port; "
-                    + "the printer options on the Devices and Timelapse tabs disappear but keep their values."),
+                    + "the printer options on the Camera and Timelapse tabs disappear but keep their values."),
             };
 
             if (!string.IsNullOrEmpty(o.MachineType) || !string.IsNullOrEmpty(o.Firmware))
@@ -114,7 +114,7 @@ public sealed class PrinterSettingsSection : ISettingsSection
                 changes[Key("Firmware")] = info.Firmware ?? "";
                 changes[Key("Uuid")] = info.Uuid ?? "";
                 linkedMessage = $"Linked with {info.MachineType ?? "the printer"} ({info.Firmware ?? "unknown firmware"}). "
-                    + "Printer options are now available on the Devices and Timelapse tabs.";
+                    + "Printer options are now available on the Camera and Timelapse tabs.";
             }
 
             changes[Key("Linked")] = linked;

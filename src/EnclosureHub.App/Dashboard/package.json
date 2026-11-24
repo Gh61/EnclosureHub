@@ -1,0 +1,20 @@
+{
+  "name": "enclosurehub-dashboard",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Enclosure Hub web dashboard – Vue 3 + TypeScript + SCSS, built with Vite into ../wwwroot",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "check": "vue-tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "sass-embedded": "^1.89.0",
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0",
+    "vue": "^3.5.0",
+    "vue-tsc": "^3.0.0"
+  }
+}

@@ -3,7 +3,7 @@
   <PropertyGroup>
     <RootNamespace>EnclosureHub.App</RootNamespace>
     <AssemblyName>enclosurehub</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
 
     <!-- Raspberry Pi 2 has 1 GB RAM and 4 slow cores: workstation GC without background GC saves memory -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
@@ -14,6 +14,11 @@
 
     <!-- RuntimeIdentifier is intentionally NOT set here so the app can be debugged on Windows.
          Publish with: dotnet publish src/EnclosureHub.App -c Release -r linux-arm self-contained -->
+
+    <!-- The web dashboard (Vue + TypeScript + SCSS) lives in Dashboard/ and is built with Vite into wwwroot/.
+         Its sources and node_modules are not project items; wwwroot is generated (see BuildDashboard). -->
+    <DashboardDir>$(MSBuildProjectDirectory)/Dashboard/</DashboardDir>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Dashboard/**;wwwroot/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +36,30 @@
   <ItemGroup>
     <InternalsVisibleTo Include="EnclosureHub.Tests" />
   </ItemGroup>
+
+  <ItemGroup>
+    <DashboardSource Include="Dashboard/src/**;Dashboard/public/**;Dashboard/index.html;Dashboard/package.json;Dashboard/package-lock.json;Dashboard/vite.config.ts;Dashboard/tsconfig.json" />
+  </ItemGroup>
+
+  <!-- npm is needed on the build machine (never on the Pi). Packages are installed once; the dashboard is rebuilt
+       only when a source changed. `npm run build` also type-checks the templates (vue-tsc). -->
+  <Target Name="RestoreDashboard" Condition="!Exists('$(DashboardDir)node_modules')">
+    <Message Importance="high" Text="Installing dashboard npm packages…" />
+    <Exec Command="npm ci --no-audit --no-fund" WorkingDirectory="$(DashboardDir)" />
+  </Target>
+
+  <Target Name="BuildDashboard" BeforeTargets="BeforeBuild" DependsOnTargets="RestoreDashboard" Inputs="@(DashboardSource)" Outputs="wwwroot/index.html">
+    <Message Importance="high" Text="Building the dashboard (Vite)…" />
+    <Exec Command="npm run build" WorkingDirectory="$(DashboardDir)" />
+  </Target>
+
+  <!-- wwwroot is generated after the project was evaluated, so add it to the publish output explicitly -->
+  <Target Name="PublishDashboard" AfterTargets="ComputeFilesToPublish" DependsOnTargets="BuildDashboard">
+    <ItemGroup>
+      <DashboardOutput Include="wwwroot/**" />
+      <ResolvedFileToPublish Include="@(DashboardOutput)" RelativePath="wwwroot/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="..\EnclosureHub.Core\EnclosureHub.Core.csproj" />

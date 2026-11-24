@@ -25,8 +25,9 @@ dotnet publish (Join-Path $root "src/EnclosureHub.App") `
     -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
-# Stop the service if it is installed; make sure the directory exists and belongs to the SSH user
-ssh $Target ('sudo systemctl stop enclosurehub 2>/dev/null; sudo mkdir -p ' + $RemoteDir + ' && sudo chown "$USER" ' + $RemoteDir)
+# Stop the service if it is installed; make sure the directory exists and belongs to the SSH user.
+# The dashboard build has hashed file names: clear wwwroot so no stale assets stay behind.
+ssh $Target ('sudo systemctl stop enclosurehub 2>/dev/null; sudo mkdir -p ' + $RemoteDir + ' && sudo chown "$USER" ' + $RemoteDir + ' && rm -rf ' + $RemoteDir + '/wwwroot')
 if ($LASTEXITCODE -ne 0) { throw "ssh failed" }
 
 scp -r "$publishDir/*" "${Target}:$RemoteDir/"

@@ -1,0 +1,639 @@
+// Enclosure Hub dashboard – black background, white type and outlined white controls,
+// thin separators between rows, a small accent only for status indicators.
+
+$bg: #000;
+$fg: #fff;
+$muted: #9b9b9b;
+$line: #2b2b2b;
+$accent: #4ade80; // on / ok
+$warn: #f87171; // off / error
+$sidebar: 220px;
+$radius: 3px;
+$narrow: 760px;
+
+:root {
+  --bg: #{$bg};
+  --fg: #{$fg};
+  --muted: #{$muted};
+  --line: #{$line};
+  --accent: #{$accent};
+  --warn: #{$warn};
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: $bg;
+  color: $fg;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+
+  &.link {
+    text-decoration: underline;
+  }
+}
+
+// ---- Navigation ----
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: $sidebar;
+  padding: 28px 0;
+  border-right: 1px solid $line;
+  display: flex;
+  flex-direction: column;
+
+  a {
+    display: block;
+    padding: 11px 24px;
+    color: $muted;
+    border-left: 2px solid transparent;
+    transition: color 0.15s;
+
+    &:hover {
+      color: $fg;
+    }
+
+    &.active {
+      color: $fg;
+      border-left-color: $fg;
+    }
+  }
+}
+
+.brand {
+  padding: 0 24px 24px;
+}
+
+.brand-title {
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.brand-sub {
+  color: $muted;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.conn {
+  margin-top: auto;
+  padding: 16px 24px 0;
+  color: $muted;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// ---- Pages ----
+
+main {
+  margin-left: $sidebar;
+  padding: 28px 48px 64px;
+  max-width: 1180px;
+}
+
+h1 {
+  font-size: 24px;
+  font-weight: 400;
+  margin: 0 0 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid $line;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 400;
+  margin: 0 0 4px;
+}
+
+.section + .section {
+  margin-top: 44px;
+}
+
+.lead {
+  color: $muted;
+  margin: 0 0 28px;
+  font-size: 14px;
+}
+
+.section-desc {
+  color: $muted;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+// ---- Rows: label + description on the left, control on the right ----
+
+.rows {
+  display: block;
+}
+
+.row {
+  // Text column keeps at least 55 %; controls never push it narrower (long <option> labels)
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  gap: 8px 32px;
+  align-items: start;
+  padding: 18px 0;
+  border-bottom: 1px solid $line;
+}
+
+.label {
+  font-size: 15px;
+}
+
+.sub {
+  color: $muted;
+  font-size: 13px;
+  margin-top: 2px;
+
+  &.err {
+    color: $warn;
+  }
+}
+
+.desc {
+  color: $muted;
+  font-size: 13.5px;
+  margin-top: 4px;
+  max-width: 420px;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  min-width: 0;
+  padding-top: 2px;
+
+  select,
+  input[type='text'] {
+    width: 100%;
+    max-width: 320px;
+    min-width: 0;
+  }
+
+  .note {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+
+  &.info {
+    white-space: normal;
+    text-align: right;
+  }
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 56px;
+}
+
+.section-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0 4px;
+}
+
+// Sub-heading inside a settings section (spans both columns of the grid)
+.subheading {
+  grid-column: 1 / -1;
+  padding: 26px 0 6px;
+  border-bottom: 1px solid $line;
+
+  h3 {
+    font-size: 15px;
+    font-weight: 500;
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+
+  .desc {
+    max-width: none;
+  }
+}
+
+.related {
+  margin-top: 8px;
+}
+
+.estimate {
+  color: $fg;
+  font-size: 13px;
+  margin-top: 8px;
+  max-width: 420px;
+
+  &.err {
+    color: $warn;
+  }
+}
+
+// ---- Indicators ----
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+  flex: none;
+  display: inline-block;
+
+  &.on {
+    background: $accent;
+  }
+
+  &.off {
+    background: #555;
+  }
+
+  &.err {
+    background: $warn;
+  }
+}
+
+.note {
+  color: $muted;
+  font-size: 13px;
+
+  &.err {
+    color: $warn;
+  }
+
+  &.ok {
+    color: $accent;
+  }
+}
+
+// Inline sparkline of live readings (Status page): one thin line, min/max labels with short ticks on the left
+.spark {
+  flex: none;
+  display: block;
+  overflow: visible;
+
+  polyline {
+    fill: none;
+    stroke: $fg;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .spark-axis {
+    stroke: $muted;
+    stroke-width: 1;
+  }
+
+  .spark-label {
+    fill: $muted;
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// ---- Controls: outlined, white on black ----
+
+.btn,
+select,
+input[type='text'],
+input[type='number'] {
+  background: $bg;
+  color: $fg;
+  border: 1px solid $fg;
+  border-radius: $radius;
+  font: inherit;
+  font-size: 14px;
+  padding: 7px 14px;
+  min-height: 36px;
+}
+
+.btn {
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 12.5px;
+  padding: 0 18px;
+  min-width: 96px;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover {
+    background: $fg;
+    color: $bg;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+
+    &:hover {
+      background: $bg;
+      color: $fg;
+    }
+  }
+
+  &.armed {
+    border-color: $warn;
+    color: $warn;
+
+    &:hover {
+      background: $warn;
+      color: $bg;
+    }
+  }
+}
+
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+select {
+  padding-right: 28px;
+  text-overflow: ellipsis;
+}
+
+input[type='number'] {
+  width: 110px;
+}
+
+.toggle[aria-checked='true']::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: $accent;
+  margin-right: 8px;
+  display: inline-block;
+  vertical-align: 1px;
+}
+
+.check {
+  color: $muted;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+
+  input {
+    accent-color: $fg;
+  }
+}
+
+// ---- Settings tabs ----
+
+.tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid $line;
+  margin: -8px 0 28px;
+
+  a {
+    padding: 8px 0 10px;
+    color: $muted;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+
+    &:hover {
+      color: $fg;
+    }
+
+    &.active {
+      color: $fg;
+      border-bottom-color: $fg;
+    }
+  }
+}
+
+// ---- Camera ----
+
+.camera {
+  border: 1px solid $line;
+  border-radius: $radius;
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.camera-view {
+  background: #050505;
+  aspect-ratio: 4 / 3;
+  max-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $muted;
+  position: relative;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  .placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.camera-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid $line;
+  font-size: 13.5px;
+  color: $muted;
+
+  .name {
+    color: $fg;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .btn {
+    min-width: 72px;
+    min-height: 30px;
+    margin-right: 8px;
+  }
+}
+
+.empty {
+  color: $muted;
+  padding: 24px 0;
+}
+
+// ---- Timelapse ----
+
+.video {
+  .video-info {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    min-width: 0;
+
+    > div {
+      min-width: 0;
+    }
+  }
+
+  .thumb {
+    flex: none;
+    width: 128px;
+    aspect-ratio: 4 / 3;
+    background: #050505;
+    border: 1px solid $line;
+    border-radius: $radius;
+    overflow: hidden;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+  }
+
+  .control {
+    flex-wrap: wrap;
+    align-self: center;
+
+    .btn {
+      min-width: 0;
+    }
+  }
+}
+
+// ---- Printer ----
+
+.log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.log {
+  border: 1px solid $line;
+  border-radius: $radius;
+  background: #050505;
+  height: 420px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-time {
+  color: $muted;
+  flex: none;
+}
+
+.log-dir {
+  flex: none;
+  width: 1ch;
+}
+
+.dir-in {
+  color: #d6d6d6;
+}
+
+.dir-out {
+  color: $fg;
+  font-weight: 600;
+}
+
+.dir-info {
+  color: $muted;
+  font-style: italic;
+}
+
+// ---- Narrow screens: navigation on top ----
+
+@media (max-width: $narrow) {
+  .sidebar {
+    position: static;
+    width: auto;
+    padding: 12px 8px;
+    border-right: none;
+    border-bottom: 1px solid $line;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+
+    a {
+      padding: 8px 12px;
+      border-left: none;
+      border-bottom: 2px solid transparent;
+
+      &.active {
+        border-bottom-color: $fg;
+      }
+    }
+  }
+
+  .brand {
+    padding: 4px 12px;
+    flex-basis: 100%;
+  }
+
+  .conn {
+    margin: 0 0 0 auto;
+    padding: 0 12px;
+  }
+
+  main {
+    margin-left: 0;
+    padding: 20px 16px 48px;
+  }
+
+  .grid-2,
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .control {
+    justify-content: flex-start;
+  }
+}
